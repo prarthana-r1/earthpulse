@@ -16,7 +16,8 @@ import numpy as np
 import os
 from openmeteo_client import fetch_realtime
 from feature_engineering import add_lagged_aggregates, select_features
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
 
 # --- Config ---
 OPENWEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
@@ -331,6 +332,56 @@ def weather():
         return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+
+@app.route("/weather/history", methods=["GET"])
+def weather_history():
+    city = request.args.get("city")
+    if not city:
+        return jsonify({"error": "Provide ?city=Name"}), 400
+
+    try:
+        api_key = os.environ.get("WEATHER_API_KEY_HISTORY", "")
+        if not api_key:
+            return jsonify({"error": "WEATHER_API_KEY_HISTORY not set"}), 500
+
+        # yesterday and day before yesterday
+        end_date = datetime.now(timezone.utc).date() - timedelta(days=1)
+        start_date = end_date - timedelta(days=1)
+
+        history = []
+
+        for d in [start_date, end_date]:
+            url = "http://api.weatherapi.com/v1/history.json"
+            params = {
+                "key": api_key,
+                "q": city,
+                "dt": d.isoformat()
+            }
+            r = requests.get(url, params=params, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+
+            if "forecast" not in data or not data["forecast"]["forecastday"]:
+                continue
+
+            day_data = data["forecast"]["forecastday"][0]["day"]
+
+            history.append({
+                "date": d.isoformat(),
+                "maxTemp": day_data.get("maxtemp_c"),
+                "minTemp": day_data.get("mintemp_c"),
+                "humidity": day_data.get("avghumidity"),
+                "precipitation": day_data.get("totalprecip_mm"),
+                "windSpeed": day_data.get("maxwind_kph"),
+            })
+
+        return jsonify({"city": city, "history": history})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 if __name__ == "__main__":

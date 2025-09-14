@@ -1,5 +1,6 @@
 import MapView from "./MapView";
-import { fetchWeather as fetchWeatherData, fetchPrediction as fetchPredictionApi, fetchPredictionByCoords } from "./api";
+import { fetchWeather as fetchWeatherData, fetchPrediction as fetchPredictionApi, fetchPredictionByCoords, fetchWeatherHistory } from "./api";
+
 import React, { useEffect, useState, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
 import "./index.css";
@@ -31,7 +32,9 @@ function App() {
   const [recentSearches, setRecentSearches] = useState([]);
   const [viewMode, setViewMode] = useState("daily"); // daily or hourly
   const [locationLoading, setLocationLoading] = useState(false);
-  
+  const [historyData, setHistoryData] = useState(null);
+
+  const apiKey = import.meta.env.VITE_WEATHERAPI_CURLOC;
   const searchRef = useRef(null);
   const suggestionsRef = useRef(null);
 
@@ -55,6 +58,27 @@ function App() {
     }
   };
 
+  const prepareCombinedData = () => {
+  const history = historyData?.map(day => ({
+    date: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+    maxTemp: day.maxTemp,
+    minTemp: day.minTemp,
+    humidity: day.humidity,
+    precipitation: day.precipitation,
+    windSpeed: day.windSpeed,   // ✅ added
+    type: "history"
+  })) || [];
+
+  const forecast = dailyData?.map(day => ({
+    ...day,
+    type: "forecast"
+  })) || [];
+
+  return [...history, ...forecast];
+};
+
+
+
   const getWeatherData = async (city) => {
     setWeatherLoading(true);
     try {
@@ -68,51 +92,74 @@ function App() {
   };
 
   const getCurrentLocation = () => {
-    setLocationLoading(true);
-    
-    if (!navigator.geolocation) {
-      setError("Geolocation is not supported by this browser");
-      setLocationLoading(false);
-      return;
-    }
+  setLocationLoading(true);
+  if (!navigator.geolocation) {
+    setError("Geolocation is not supported by this browser");
+    setLocationLoading(false);
+    return;
+  }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          
-          // Mock reverse geocoding - in real app, use a geocoding API
-          const mockCity = "Current Location";
-          
-          setSelected(mockCity);
-          setLocationLoading(false);
-          
-          // Get weather & prediction for current location via coords
-          const weather = await fetchWeatherData({ lat: latitude, lon: longitude });
-          setWeatherData(weather);
-          const pred = await fetchPredictionByCoords({ lat: latitude, lon: longitude });
-          setResult(pred);
-        } catch (e) {
-          setError("Failed to get location data: " + e.message);
-          setLocationLoading(false);
-        }
-      },
-      (error) => {
-        setError("Location access denied: " + error.message);
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      try {
+        const { latitude, longitude } = position.coords;
+
+        const resp = await fetch(
+          `https://api.weatherapi.com/v1/search.json?key=${apiKey}&q=${latitude},${longitude}`
+        );
+        const places = await resp.json();
+        let cityName = "Current Location";
+        if (places && places.length > 0) cityName = places[0].name;
+
+        // Update state
+        setSelected(cityName);
+
+        // Immediately fetch data for current location
+        await Promise.all([
+          getPrediction(cityName),
+          getWeatherData(cityName),
+          (async () => {
+            try {
+              const history = await fetchWeatherHistory(cityName);
+              setHistoryData(history.history);
+            } catch (e) {
+              console.error("History fetch failed:", e.message);
+            }
+          })()
+        ]);
+
         setLocationLoading(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 600000
+
+      } catch (e) {
+        setError("Failed to get location data: " + e.message);
+        setLocationLoading(false);
       }
-    );
-  };
+    },
+    (error) => {
+      setError("Location access denied: " + error.message);
+      setLocationLoading(false);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 600000 }
+  );
+};
+
+
 
   useEffect(() => {
-    getPrediction(selected);
-    getWeatherData(selected);
-  }, [selected]);
+  getPrediction(selected);
+  getWeatherData(selected);
+
+  // Fetch past 3 days
+  (async () => {
+    try {
+      const history = await fetchWeatherHistory(selected);
+      setHistoryData(history.history);
+    } catch (e) {
+      console.error("History fetch failed:", e.message);
+    }
+  })();
+}, [selected]);
+
 
   // Filter cities based on search input
   useEffect(() => {
@@ -671,27 +718,38 @@ function App() {
                 
                 {/* View Mode Toggle */}
                 <div className="flex bg-white/80 backdrop-blur-sm rounded-xl border border-gray-200 p-1 shadow-sm">
-                  <button
-                    onClick={() => setViewMode("hourly")}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-                      viewMode === "hourly"
-                        ? "bg-blue-500 text-white shadow-md"
-                        : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                  >
-                    24 Hours
-                  </button>
-                  <button
-                    onClick={() => setViewMode("daily")}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-                      viewMode === "daily"
-                        ? "bg-blue-500 text-white shadow-md"
-                        : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                  >
-                    7 Days
-                  </button>
-                </div>
+  <button
+    onClick={() => setViewMode("hourly")}
+    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
+      viewMode === "hourly"
+        ? "bg-blue-500 text-white shadow-md"
+        : "text-gray-600 hover:bg-gray-100"
+    }`}
+  >
+    24 Hours
+  </button>
+  <button
+    onClick={() => setViewMode("daily")}
+    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
+      viewMode === "daily"
+        ? "bg-blue-500 text-white shadow-md"
+        : "text-gray-600 hover:bg-gray-100"
+    }`}
+  >
+    7 Days
+  </button>
+  <button
+    onClick={() => setViewMode("combined")}
+    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
+      viewMode === "combined"
+        ? "bg-blue-500 text-white shadow-md"
+        : "text-gray-600 hover:bg-gray-100"
+    }`}
+  >
+    Past 2 Days
+  </button>
+</div>
+
               </div>
 
               {/* Temperature Chart */}
@@ -702,7 +760,12 @@ function App() {
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={viewMode === "hourly" ? hourlyData : dailyData}>
+                    <LineChart data={
+  viewMode === "hourly" ? hourlyData :
+  viewMode === "daily" ? dailyData :
+  prepareCombinedData()
+}>
+
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis 
                         dataKey={viewMode === "hourly" ? "time" : "date"} 
@@ -764,7 +827,12 @@ function App() {
                   </h3>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={viewMode === "hourly" ? hourlyData : dailyData}>
+                      <LineChart data={
+  viewMode === "hourly" ? hourlyData :
+  viewMode === "daily" ? dailyData :
+  prepareCombinedData()
+}>
+
                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                         <XAxis 
                           dataKey={viewMode === "hourly" ? "time" : "date"} 
@@ -810,7 +878,12 @@ function App() {
                   </h3>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={viewMode === "hourly" ? hourlyData : dailyData}>
+                      <BarChart data={
+  viewMode === "hourly" ? hourlyData :
+  viewMode === "daily" ? dailyData :
+  prepareCombinedData()
+}>
+
                         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                         <XAxis 
                           dataKey={viewMode === "hourly" ? "time" : "date"} 
@@ -875,6 +948,45 @@ function App() {
                   </div>
                 </div>
               )}
+
+{historyData && (
+  <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg">
+    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+      <span className="text-xl">📜</span>
+      Past 2 Days Weather
+    </h3>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {historyData.map((day, i) => (
+        <div key={i} className="p-4 bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl shadow">
+          <div className="font-semibold text-gray-700">
+            {new Date(day.date).toLocaleDateString("en-US", {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            })}
+          </div>
+          <div className="text-sm text-gray-600">
+            Min: {day.minTemp != null ? `${day.minTemp}°C` : "N/A"}
+          </div>
+          <div className="text-sm text-gray-600">
+            Max: {day.maxTemp != null ? `${day.maxTemp}°C` : "N/A"}
+          </div>
+          <div className="text-sm text-gray-600">
+            Humidity: {day.humidity != null ? `${day.humidity.toFixed(1)}%` : "N/A"}
+          </div>
+          <div className="text-sm text-gray-600">
+            Rain: {day.precipitation != null ? `${day.precipitation} mm` : "0 mm"}
+          </div>
+          <div className="text-sm text-gray-600">
+            Wind: {day.windSpeed != null ? `${day.windSpeed.toFixed(1)} km/h` : "N/A"}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
+
 
               {/* Map View */}
 <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg h-96">

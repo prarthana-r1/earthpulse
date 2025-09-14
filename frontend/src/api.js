@@ -21,3 +21,10 @@ export async function fetchPredictionByCoords({ lat, lon }) {
   const r = await axios.get(`${BACKEND}/predict`, { params: { lat, lon } });
   return r.data;
 }
+
+
+export async function fetchWeatherHistory(city) {
+  const res = await fetch(`${BACKEND}/weather/history?city=${encodeURIComponent(city)}`);
+  if (!res.ok) throw new Error("History API failed");
+  return await res.json();
+}
