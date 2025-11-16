@@ -28,3 +28,9 @@ export async function fetchWeatherHistory(city) {
   if (!res.ok) throw new Error("History API failed");
   return await res.json();
 }
+
+export async function sendPush(payload) {
+  // payload: { title, body }
+  const r = await axios.post(`${BACKEND}/push/test`, payload);
+  return r.data;
+}

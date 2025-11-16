@@ -1,5 +1,5 @@
 import MapView from "./MapView";
-import { fetchWeather as fetchWeatherData, fetchPrediction as fetchPredictionApi, fetchPredictionByCoords, fetchWeatherHistory } from "./api";
+import { fetchWeather as fetchWeatherData, fetchPrediction as fetchPredictionApi, fetchPredictionByCoords, fetchWeatherHistory, sendPush } from "./api";
 
 import React, { useEffect, useState, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
@@ -10,18 +10,19 @@ const SUGGESTED_CITIES = [
   "Delhi", "Mumbai", "Bengaluru", "Chennai", "Kolkata", "Hyderabad",
   "Pune", "Ahmedabad", "Jaipur", "Surat", "Lucknow", "Kanpur",
   "Nagpur", "Indore", "Thane", "Bhopal", "Visakhapatnam", "Pimpri-Chinchwad",
+  "Floodville",
   "Patna", "Vadodara", "Ghaziabad", "Ludhiana", "Agra", "Nashik",
   "Faridabad", "Meerut", "Rajkot", "Kalyan-Dombivali", "Vasai-Virar",
   "Varanasi", "Srinagar", "Aurangabad", "Dhanbad", "Amritsar",
   "Navi Mumbai", "Allahabad", "Ranchi", "Howrah", "Coimbatore",
   "Jabalpur", "Gwalior", "Vijayawada", "Jodhpur", "Madurai",
-  "Raipur", "Kota", "Guwahati", "Chandigarh", "Solapur","Punjab"
+  "Raipur", "Kota", "Guwahati", "Chandigarh", "Solapur","Thiruvananthapuram",
 ];
 
 // Replaced with real API imports
 function App() {
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState("Delhi");
+  const [selected, setSelected] = useState("");
   const [result, setResult] = useState(null);
   const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -31,12 +32,131 @@ function App() {
   const [filteredCities, setFilteredCities] = useState([]);
   const [recentSearches, setRecentSearches] = useState([]);
   const [viewMode, setViewMode] = useState("daily"); // daily or hourly
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ep_notifications_enabled') || 'false'); } catch { return false; }
+  });
+  const [inAppAlerts, setInAppAlerts] = useState([]);
   const [locationLoading, setLocationLoading] = useState(false);
   const [historyData, setHistoryData] = useState(null);
 
   const apiKey = import.meta.env.VITE_WEATHERAPI_CURLOC;
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
   const searchRef = useRef(null);
   const suggestionsRef = useRef(null);
+  const autoSelectedRef = useRef(false);
+  const hasUserSelectedRef = useRef(false);
+  const [toasts, setToasts] = useState([]);
+
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
+
+
+  // Register service worker and setup push subscription
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        // listen for messages from SW
+        navigator.serviceWorker.addEventListener('message', (ev) => {
+          if (ev.data?.type === 'PUSH_RECEIVED') {
+            const { title, body } = ev.data.payload || {};
+            setToasts(prev => [{ id: Date.now(), title, body }, ...prev].slice(0, 5));
+          }
+        });
+      }).catch(err => console.warn('SW registration failed', err));
+    }
+  }, []);
+
+  // Auto-select current location on first load
+  useEffect(() => {
+    if (!selected) {
+      getCurrentLocation();
+    }
+  }, []);
+
+  const showToast = (title, body) => {
+    setToasts(prev => [{ id: Date.now(), title, body }, ...prev].slice(0, 5));
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+const subscribeToPush = async () => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const resp = await fetch(`${BACKEND_URL}/vapid_public_key`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const publicKey = data.publicKey;
+    const reg = await navigator.serviceWorker.ready;
+
+    // Check if already subscribed to avoid creating duplicates
+    let existing = await reg.pushManager.getSubscription();
+    if (!existing) {
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+      await fetch(`${BACKEND_URL}/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub })
+      });
+      localStorage.setItem('ep_push_subscribed', 'true');
+      showToast('Subscribed', 'Push notifications enabled');
+    } else {
+      // Ensure server knows about this subscription (in case backend restarted)
+      await fetch(`${BACKEND_URL}/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: existing })
+      });
+      localStorage.setItem('ep_push_subscribed', 'true');
+      showToast('Subscribed', 'Push subscription active');
+    }
+  } catch (e) {
+    console.warn('Push subscribe failed', e);
+  }
+
+  // ✅ Always refresh subscription every time app loads (in case backend restarted)
+  if (localStorage.getItem('ep_push_subscribed') !== 'true') {
+    localStorage.setItem('ep_push_subscribed', 'true');
+  }
+};
+
+
+
+  // Auto-enable notifications on first load
+useEffect(() => {
+  if ('Notification' in window) {
+    // Ask permission if not granted or denied
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          setNotificationsEnabled(true);
+          localStorage.setItem('ep_notifications_enabled', 'true');
+          subscribeToPush();
+        }
+      });
+    } else if (Notification.permission === 'granted') {
+      // Already granted earlier
+      setNotificationsEnabled(true);
+      localStorage.setItem('ep_notifications_enabled', 'true');
+      subscribeToPush();
+    }
+  }
+}, []);
+
+
+  // helper
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
 
   const getPrediction = async (city) => {
     setLoading(true);
@@ -44,6 +164,7 @@ function App() {
     try {
       const r = await fetchPredictionApi(city);
       setResult(r);
+      // result set -> alerts are handled in the result useEffect (avoid double alerts)
       
       // Add to recent searches (avoid duplicates)
       setRecentSearches(prev => {
@@ -58,13 +179,78 @@ function App() {
     }
   };
 
+  // Notification helpers
+  const sendBrowserNotification = (title, body) => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      try { new Notification(title, { body }); } catch (e) { console.warn('Notification failed', e); }
+    }
+  };
+
+  const addInAppAlert = (title, body) => {
+    setInAppAlerts(prev => [{ id: Date.now(), title, body }, ...prev].slice(0, 5));
+  };
+
+  const processResultAlerts = (res) => {
+    if (!res) return;
+
+    const floodProb = res.flood?.probability || 0;
+    const fireProb = res.wildfire?.probability || 0;
+
+    const mediumThreshold = 0.4; // >=40% -> medium
+    const highThreshold = 0.7; // >=70% -> high
+
+    if (floodProb >= highThreshold) {
+      const title = `${res.city}: HIGH Flood Risk`;
+      const body = `Flood probability ${(floodProb*100).toFixed(0)}% — take precautions.`;
+      addInAppAlert(title, body);
+      if (notificationsEnabled) sendBrowserNotification(title, body);
+    } else if (floodProb >= mediumThreshold) {
+      const title = `${res.city}: Flood Watch`;
+      const body = `Flood probability ${(floodProb*100).toFixed(0)}% — monitor conditions.`;
+      addInAppAlert(title, body);
+      if (notificationsEnabled) sendBrowserNotification(title, body);
+    }
+
+    if (fireProb >= highThreshold) {
+      const title = `${res.city}: HIGH Fire Risk`;
+      const body = `Fire probability ${(fireProb*100).toFixed(0)}% — exercise caution.`;
+      addInAppAlert(title, body);
+      if (notificationsEnabled) sendBrowserNotification(title, body);
+    } else if (fireProb >= mediumThreshold) {
+      const title = `${res.city}: Fire Watch`;
+      const body = `Fire probability ${(fireProb*100).toFixed(0)}% — monitor conditions.`;
+      addInAppAlert(title, body);
+      if (notificationsEnabled) sendBrowserNotification(title, body);
+    }
+  };
+
+  const enableNotifications = async () => {
+    try {
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+      }
+    } catch (e) {
+      console.warn('Notification permission error', e);
+    }
+    setNotificationsEnabled(true);
+    localStorage.setItem('ep_notifications_enabled', 'true');
+    // try subscribing to push as well
+    subscribeToPush();
+  };
+
+  const disableNotifications = () => {
+    setNotificationsEnabled(false);
+    localStorage.setItem('ep_notifications_enabled', 'false');
+  };
+
   const prepareCombinedData = () => {
   const history = historyData?.map(day => ({
     date: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
     maxTemp: day.maxTemp,
     minTemp: day.minTemp,
     humidity: day.humidity,
-    precipitation: day.precipitation,
+    precipitation: day.precipitation ?? day.precip ?? 0,
     windSpeed: day.windSpeed,   // ✅ added
     type: "history"
   })) || [];
@@ -91,10 +277,18 @@ function App() {
     }
   };
 
-  const getCurrentLocation = () => {
+  const getCurrentLocation = (allowOverride = false) => {
   setLocationLoading(true);
   if (!navigator.geolocation) {
     setError("Geolocation is not supported by this browser");
+    setLocationLoading(false);
+    return;
+  }
+
+  // If the user has explicitly chosen a city, don't overwrite it unless
+  // allowOverride is true (the button press should pass true).
+  if (hasUserSelectedRef.current && !allowOverride) {
+    setError('Keeping your selected city. Click the pin to override with current location.');
     setLocationLoading(false);
     return;
   }
@@ -107,12 +301,26 @@ function App() {
         const resp = await fetch(
           `https://api.weatherapi.com/v1/search.json?key=${apiKey}&q=${latitude},${longitude}`
         );
-        const places = await resp.json();
-        let cityName = "Current Location";
-        if (places && places.length > 0) cityName = places[0].name;
+        if (!resp.ok) {
+          throw new Error('Reverse geocoding failed');
+        }
+        let places = [];
+        try { places = await resp.json(); } catch (e) { throw new Error('Invalid response from location lookup'); }
 
-        // Update state
+        let cityName = "Current Location";
+        if (places && places.length > 0 && places[0].name) cityName = places[0].name;
+
+        // If the user selected a city while we were resolving coords, respect it
+        if (hasUserSelectedRef.current && !allowOverride) {
+          setError('Keeping your selected city. Click the pin to override with current location.');
+          setLocationLoading(false);
+          return;
+        }
+
+        // Update state (mark as auto-selected on load)
         setSelected(cityName);
+        autoSelectedRef.current = true;
+        hasUserSelectedRef.current = false;
 
         // Immediately fetch data for current location
         await Promise.all([
@@ -146,19 +354,101 @@ function App() {
 
 
   useEffect(() => {
-  getPrediction(selected);
-  getWeatherData(selected);
+    if (!selected) return; // avoid calling APIs with empty city (prevents 400)
 
-  // Fetch past 3 days
-  (async () => {
-    try {
-      const history = await fetchWeatherHistory(selected);
-      setHistoryData(history.history);
-    } catch (e) {
-      console.error("History fetch failed:", e.message);
+    getPrediction(selected);
+    getWeatherData(selected);
+
+    // Fetch past 3 days
+    (async () => {
+      try {
+        const history = await fetchWeatherHistory(selected);
+        setHistoryData(history.history);
+      } catch (e) {
+        console.error("History fetch failed:", e.message);
+      }
+    })();
+  }, [selected]);
+
+  // Watch for changes to result and create alerts when risks are medium/high
+  useEffect(() => {
+    if (!result) return;
+
+    const floodProb = result.flood?.probability || 0;
+    const fireProb = result.wildfire?.probability || 0;
+
+    const mediumThreshold = 0.4; // >=40% -> medium
+    const highThreshold = 0.7; // >=70% -> high
+
+    if (floodProb >= highThreshold) {
+      const title = `${result.city}: HIGH Flood Risk`;
+      const body = `Flood probability ${(floodProb*100).toFixed(0)}% — take precautions.`;
+      // Always show in-app alert
+      addInAppAlert(title, body);
+      // Generate a tag so native notifications from page and SW can be deduplicated/replaced
+      const tag = `earthpulse:${result.city}:flood:${Math.floor(Date.now()/60000)}`;
+      // Send native/browser notification from page (if enabled)
+      if (notificationsEnabled) {
+        try {
+          new Notification(title, { body, tag });
+        } catch (e) { console.warn('Notification failed', e); }
+      }
+      // If subscribed to push, also request the backend to send a push (include tag)
+      try {
+        if (notificationsEnabled && localStorage.getItem('ep_push_subscribed') === 'true') {
+          sendPush({ title, body, tag }).catch(e => console.warn('push send failed', e));
+        }
+      } catch (e) { /* ignore */ }
+    } else if (floodProb >= mediumThreshold) {
+      const title = `${result.city}: Flood Watch`;
+      const body = `Flood probability ${(floodProb*100).toFixed(0)}% — monitor conditions.`;
+      addInAppAlert(title, body);
+      const tag = `earthpulse:${result.city}:flood:${Math.floor(Date.now()/60000)}`;
+      if (notificationsEnabled) {
+        try {
+          new Notification(title, { body, tag });
+        } catch (e) { console.warn('Notification failed', e); }
+      }
+      try {
+        if (notificationsEnabled && localStorage.getItem('ep_push_subscribed') === 'true') {
+          sendPush({ title, body, tag }).catch(e => console.warn('push send failed', e));
+        }
+      } catch (e) { }
     }
-  })();
-}, [selected]);
+
+    if (fireProb >= highThreshold) {
+      const title = `${result.city}: HIGH Fire Risk`;
+      const body = `Fire probability ${(fireProb*100).toFixed(0)}% — exercise caution.`;
+      addInAppAlert(title, body);
+      const tag = `earthpulse:${result.city}:fire:${Math.floor(Date.now()/60000)}`;
+      if (notificationsEnabled) {
+        try {
+          new Notification(title, { body, tag });
+        } catch (e) { console.warn('Notification failed', e); }
+      }
+      try {
+        if (notificationsEnabled && localStorage.getItem('ep_push_subscribed') === 'true') {
+          sendPush({ title, body, tag }).catch(e => console.warn('push send failed', e));
+        }
+      } catch (e) { }
+    } else if (fireProb >= mediumThreshold) {
+      const title = `${result.city}: Fire Watch`;
+      const body = `Fire probability ${(fireProb*100).toFixed(0)}% — monitor conditions.`;
+      addInAppAlert(title, body);
+      const tag = `earthpulse:${result.city}:fire:${Math.floor(Date.now()/60000)}`;
+      if (notificationsEnabled) {
+        try {
+          new Notification(title, { body, tag });
+        } catch (e) { console.warn('Notification failed', e); }
+      }
+      try {
+        if (notificationsEnabled && localStorage.getItem('ep_push_subscribed') === 'true') {
+          sendPush({ title, body, tag }).catch(e => console.warn('push send failed', e));
+        }
+      } catch (e) { }
+    }
+
+  }, [result, notificationsEnabled]);
 
 
   // Filter cities based on search input
@@ -194,6 +484,9 @@ function App() {
   }, []);
 
   const handleCitySelect = (city) => {
+    // user explicitly selected a city -> clear auto-selected flag
+    autoSelectedRef.current = false;
+    hasUserSelectedRef.current = true;
     setSelected(city);
     setSearch("");
     setShowSuggestions(false);
@@ -329,64 +622,74 @@ function App() {
   const hourlyData = prepareHourlyData();
   const dailyData = prepareDailyData();
 
-  return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Weather-themed Header */}
-      <header className="bg-gradient-to-r from-slate-800 via-blue-800 to-indigo-900 text-white p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-4 left-1/4 w-16 h-16 bg-white rounded-full animate-pulse"></div>
-          <div className="absolute top-8 right-1/3 w-12 h-12 bg-white rounded-full animate-pulse delay-700"></div>
-          <div className="absolute bottom-4 left-1/2 w-8 h-8 bg-white rounded-full animate-pulse delay-1000"></div>
+  
+return (
+    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* Header */}
+      <header className="bg-gradient-to-r from-slate-800 via-slate-900 to-slate-800 text-white p-4 shadow-lg relative overflow-hidden border-b border-slate-700/50">
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute top-0 left-0 w-full h-full" style={{
+            backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(59, 130, 246, 0.1) 10px, rgba(59, 130, 246, 0.1) 20px)'
+          }}></div>
         </div>
-        
+
         <div className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="text-4xl animate-bounce">⛈️</div>
+          <div className="flex items-center gap-3">
+            <div className="text-2xl">🌍</div>
             <div>
-              <h1 className="text-2xl font-bold tracking-wide">EarthPulse</h1>
-              <p className="text-blue-200 text-sm">Advanced Weather & Disaster Risk Monitoring</p>
+              <h1 className="text-xl font-bold tracking-wide">EarthPulse</h1>
+              <p className="text-blue-300 text-xs font-medium">Disaster Prediction & Monitoring System</p>
             </div>
           </div>
-          
-          {/* Current Location Button */}
-          <button
-            onClick={getCurrentLocation}
-            disabled={locationLoading}
-            className="flex items-center gap-2 bg-white/20 hover:bg-white/30 backdrop-blur-sm border border-white/30 rounded-xl px-4 py-2 transition-all duration-300 hover:scale-105 disabled:opacity-50"
-          >
-            <span className={`text-lg ${locationLoading ? 'animate-spin' : ''}`}>
-              {locationLoading ? '🔄' : '📍'}
-            </span>
-            <span className="text-sm font-medium">Current Location</span>
-          </button>
+      
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => getCurrentLocation(true)}
+              disabled={locationLoading}
+              className="flex items-center gap-2 bg-slate-700/60 hover:bg-slate-600/60 backdrop-blur-sm border border-slate-600/50 rounded-lg px-3 py-2 transition-all duration-200 disabled:opacity-50 text-sm font-medium"
+            >
+              <span className={`text-base ${locationLoading ? 'animate-spin' : ''}`}>
+                {locationLoading ? '🔄' : '📍'}
+              </span>
+            </button>
+
+            <div className="flex items-center gap-2 bg-slate-700/40 border border-slate-600/40 rounded-lg px-2 py-1 text-xs">
+              <button
+                disabled
+                className="px-2 py-1 rounded-md text-xs font-semibold bg-blue-600/80 text-white"
+              >
+                🔔
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Weather Station Sidebar */}
-        <aside className="w-96 bg-white/80 backdrop-blur-sm border-r border-gray-200/50 p-6 overflow-y-auto shadow-lg">
+        {/* Sidebar */}
+        <aside className="w-96 bg-gradient-to-b from-slate-800 to-slate-900 border-r border-slate-700/30 p-6 overflow-y-auto shadow-xl">
           <div className="space-y-6">
-            <div className="text-center">
-              <h3 className="text-xl font-bold mb-2 text-gray-800 flex items-center justify-center gap-2">
-                <span className="text-2xl">🌐</span>
-                Location Search
+            <div className="text-center border-b border-slate-700/30 pb-4">
+              <h3 className="text-xl font-bold mb-2 text-blue-400 flex items-center justify-center gap-2">
+                <span className="text-2xl">🎯</span>
+                Location Scanner
               </h3>
-              <p className="text-sm text-gray-600">Monitor weather risks worldwide</p>
+              <p className="text-sm text-slate-400 font-medium">Global Threat Assessment</p>
             </div>
 
-            {/* Enhanced Search Input */}
+            {/* Search Input */}
             <div className="relative" ref={searchRef}>
               <form onSubmit={handleSearchSubmit}>
                 <div className="relative group">
                   <input
                     type="text"
-                    placeholder="Search any city on Earth..."
+                    placeholder="Search location..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onFocus={handleSearchFocus}
-                    className="w-full p-4 pl-12 pr-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-400 outline-none transition-all duration-300 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 placeholder-gray-500"
+                    className="w-full p-4 pl-12 pr-4 border border-slate-600/50 bg-slate-800/60 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 outline-none transition-all duration-300 backdrop-blur-sm hover:bg-slate-700/60 text-slate-200 placeholder-slate-500"
                   />
-                  <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors">
+                  <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-blue-500 group-focus-within:text-blue-400 transition-colors">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
@@ -394,27 +697,27 @@ function App() {
                 </div>
               </form>
 
-              {/* Weather-styled Autocomplete */}
+              {/* Autocomplete */}
               {showSuggestions && (search.length > 0 || recentSearches.length > 0) && (
                 <div
                   ref={suggestionsRef}
-                  className="absolute top-full left-0 right-0 bg-white/95 backdrop-blur-md border border-gray-200 rounded-xl shadow-2xl mt-2 max-h-72 overflow-y-auto z-20"
+                  className="absolute top-full left-0 right-0 bg-slate-800/98 backdrop-blur-md border border-slate-600/50 rounded-xl shadow-2xl mt-2 max-h-72 overflow-y-auto z-20"
                 >
                   {search.length > 0 && filteredCities.length > 0 && (
                     <>
-                      <div className="px-4 py-3 text-xs font-bold text-gray-500 bg-gray-50/80 border-b border-gray-100 flex items-center gap-2">
+                      <div className="px-4 py-3 text-xs font-semibold text-blue-400 bg-slate-900/80 border-b border-slate-700/30 flex items-center gap-2">
                         <span>🌍</span>
-                        WEATHER STATIONS
+                        Available Locations
                       </div>
                       {filteredCities.map((city, index) => (
                         <button
                           key={`suggestion-${index}`}
                           onClick={() => handleCitySelect(city)}
-                          className="w-full text-left px-4 py-3 hover:bg-blue-50/80 focus:bg-blue-50/80 focus:outline-none transition-all duration-200 group"
+                          className="w-full text-left px-4 py-3 hover:bg-slate-700/50 focus:bg-slate-700/50 focus:outline-none transition-all duration-200 group border-b border-slate-700/20"
                         >
                           <div className="flex items-center gap-3">
-                            <span className="text-blue-500 group-hover:scale-110 transition-transform">🏙️</span>
-                            <span className="text-gray-800 font-medium">{city}</span>
+                            <span className="text-blue-500 group-hover:scale-110 transition-transform">📍</span>
+                            <span className="text-slate-300">{city}</span>
                           </div>
                         </button>
                       ))}
@@ -423,17 +726,17 @@ function App() {
 
                   {search.length > 0 && !filteredCities.some(city => city.toLowerCase() === search.toLowerCase()) && (
                     <>
-                      <div className="px-4 py-3 text-xs font-bold text-gray-500 bg-gray-50/80 border-b border-gray-100 flex items-center gap-2">
+                      <div className="px-4 py-3 text-xs font-semibold text-amber-400 bg-slate-900/80 border-b border-slate-700/30 flex items-center gap-2">
                         <span>🔍</span>
-                        CUSTOM SEARCH
+                        Custom Search
                       </div>
                       <button
                         onClick={() => handleCitySelect(search)}
-                        className="w-full text-left px-4 py-3 hover:bg-green-50/80 focus:bg-green-50/80 focus:outline-none transition-all duration-200 group"
+                        className="w-full text-left px-4 py-3 hover:bg-amber-900/30 focus:bg-amber-900/30 focus:outline-none transition-all duration-200 group"
                       >
                         <div className="flex items-center gap-3">
-                          <span className="text-green-500 group-hover:scale-110 transition-transform">🌍</span>
-                          <span className="text-gray-800 font-medium">Search "{search}"</span>
+                          <span className="text-amber-500 group-hover:scale-110 transition-transform">🌍</span>
+                          <span className="text-slate-300">Search "{search}"</span>
                         </div>
                       </button>
                     </>
@@ -441,19 +744,19 @@ function App() {
 
                   {search.length === 0 && recentSearches.length > 0 && (
                     <>
-                      <div className="px-4 py-3 text-xs font-bold text-gray-500 bg-gray-50/80 border-b border-gray-100 flex items-center gap-2">
+                      <div className="px-4 py-3 text-xs font-semibold text-emerald-400 bg-slate-900/80 border-b border-slate-700/30 flex items-center gap-2">
                         <span>⏰</span>
-                        RECENT FORECASTS
+                        Recent Searches
                       </div>
                       {recentSearches.map((city, index) => (
                         <button
                           key={`recent-${index}`}
                           onClick={() => handleCitySelect(city)}
-                          className="w-full text-left px-4 py-3 hover:bg-purple-50/80 focus:bg-purple-50/80 focus:outline-none transition-all duration-200 group"
+                          className="w-full text-left px-4 py-3 hover:bg-emerald-900/30 focus:bg-emerald-900/30 focus:outline-none transition-all duration-200 group border-b border-slate-700/20"
                         >
                           <div className="flex items-center gap-3">
-                            <span className="text-purple-500 group-hover:scale-110 transition-transform">📍</span>
-                            <span className="text-gray-800 font-medium">{city}</span>
+                            <span className="text-emerald-500 group-hover:scale-110 transition-transform">📍</span>
+                            <span className="text-slate-300">{city}</span>
                           </div>
                         </button>
                       ))}
@@ -461,45 +764,45 @@ function App() {
                   )}
 
                   {search.length > 0 && filteredCities.length === 0 && (
-                    <div className="px-4 py-6 text-gray-500 text-center">
+                    <div className="px-4 py-6 text-slate-500 text-center">
                       <div className="text-2xl mb-2">🌐</div>
-                      <div>No stations found. Press Enter to search "{search}"</div>
+                      <div className="text-sm">No locations found. Press Enter to search "{search}"</div>
                     </div>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Current Weather Data */}
+            {/* Current Weather */}
             {weatherData && !weatherLoading && (
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-600 to-blue-700 p-6 text-white shadow-lg">
-                <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white shadow-xl border border-slate-600/50">
+                <div className="absolute inset-0 bg-blue-500/5 backdrop-blur-sm"></div>
                 <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-4 border-b border-slate-600/30 pb-3">
                     <div>
-                      <h4 className="text-xl font-bold">{weatherData.location.name}</h4>
-                      <p className="text-blue-200 text-sm">{weatherData.current.condition.text}</p>
+                      <h4 className="text-xl font-bold text-blue-300">{weatherData.location.name}</h4>
+                      <p className="text-slate-400 text-sm">{weatherData.current.condition.text}</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-3xl font-bold">{weatherData.current.temp_c}°C</div>
-                      <div className="text-sm opacity-75">Feels like {weatherData.current.feelslike_c}°C</div>
+                      <div className="text-3xl font-bold text-blue-400">{weatherData.current.temp_c}°C</div>
+                      <div className="text-sm opacity-75">Feels {weatherData.current.feelslike_c}°C</div>
                     </div>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700/20">
                       <span>💨</span>
                       <span>{weatherData.current.wind_kph} km/h {weatherData.current.wind_dir}</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700/20">
                       <span>💧</span>
-                      <span>{weatherData.current.humidity}% humidity</span>
+                      <span>{weatherData.current.humidity}% Humidity</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700/20">
                       <span>🌧️</span>
-                      <span>{weatherData.current.precip_mm}mm rainfall</span>
+                      <span>{weatherData.current.precip_mm}mm Rain</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-slate-900/50 p-3 rounded-lg border border-slate-700/20">
                       <span>📊</span>
                       <span>{weatherData.current.pressure_mb} mb</span>
                     </div>
@@ -508,53 +811,53 @@ function App() {
               </div>
             )}
 
-            {/* Weather Loading Animation */}
+            {/* Loading */}
             {(loading || weatherLoading) && (
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-600 to-slate-700 p-6 text-white shadow-lg">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white shadow-xl border border-blue-600/50">
                 <div className="absolute inset-0">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 via-purple-400 to-blue-400 animate-pulse"></div>
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-600 animate-pulse"></div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="relative">
-                    <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <div className="w-12 h-12 border-4 border-slate-700/30 border-t-blue-500 rounded-full animate-spin"></div>
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-lg">🛰️</span>
                     </div>
                   </div>
                   <div>
-                    <div className="font-bold text-lg">Analyzing Weather Patterns</div>
-                    <div className="text-slate-300 text-sm">Scanning {selected} for risk indicators...</div>
+                    <div className="font-bold text-lg text-blue-400">Scanning Location</div>
+                    <div className="text-slate-400 text-sm">Analyzing {selected}...</div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Weather Alert Error */}
+            {/* Error */}
             {error && (
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-600 to-red-700 p-5 text-white shadow-lg">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-900/50 to-rose-800/50 p-5 text-white shadow-xl border border-rose-700/50">
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl animate-bounce">⚠️</span>
+                  <span className="text-2xl">⚠️</span>
                   <div>
-                    <div className="font-bold">Weather Alert</div>
-                    <div className="text-red-200 text-sm">{error}</div>
+                    <div className="font-bold text-rose-300">System Alert</div>
+                    <div className="text-rose-200 text-sm">{error}</div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Weather Forecast Cards */}
+            {/* Threat Cards */}
             {result && !loading && !error && (
               <div className="space-y-6">
-                {/* Main Weather Summary */}
-                <div className={`relative overflow-hidden rounded-2xl p-6 shadow-xl border-2 ${overallColors.bg} ${overallColors.border} ${overallColors.text}`}>
-                  <div className="absolute inset-0 bg-white/5 backdrop-blur-sm"></div>
+                {/* Main Summary */}
+                <div className={`relative overflow-hidden rounded-2xl p-6 shadow-xl border ${overallColors.bg} ${overallColors.border} ${overallColors.text}`}>
+                  <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
                   <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
                       <div className="flex items-center gap-3">
-                        <span className="text-3xl">🌪️</span>
+                        <span className="text-3xl">⚠️</span>
                         <div>
                           <h4 className="text-xl font-bold">{result.city}</h4>
-                          <p className="text-sm opacity-80">Current Risk Assessment</p>
+                          <p className="text-sm opacity-80">Threat Assessment</p>
                         </div>
                       </div>
                       <div className="text-right">
@@ -562,53 +865,53 @@ function App() {
                           {overallColors.level}
                         </div>
                         <div className="text-sm opacity-75">
-                          {getRiskLevel(maxRisk)} Risk Zone
+                          {getRiskLevel(maxRisk)} Risk
                         </div>
                       </div>
                     </div>
                     
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="text-center">
+                      <div className="text-center bg-black/20 rounded-lg p-3 border border-white/10">
                         <div className="text-2xl mb-1">🌊</div>
                         <div className="font-bold text-lg">
                           {((result.flood?.probability || 0) * 100).toFixed(0)}%
                         </div>
-                        <div className="text-xs opacity-75">Flood Risk</div>
+                        <div className="text-xs opacity-75">Flood</div>
                       </div>
-                      <div className="text-center">
+                      <div className="text-center bg-black/20 rounded-lg p-3 border border-white/10">
                         <div className="text-2xl mb-1">🔥</div>
                         <div className="font-bold text-lg">
                           {((result.wildfire?.probability || 0) * 100).toFixed(0)}%
                         </div>
-                        <div className="text-xs opacity-75">Fire Risk</div>
+                        <div className="text-xs opacity-75">Fire</div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Detailed Weather Risk Cards */}
+                {/* Detailed Cards */}
                 <div className="space-y-4">
-                  {/* Flood Forecast */}
-                  <div className={`relative overflow-hidden rounded-xl p-5 shadow-lg border ${getFloodColors(result.flood?.probability || 0).bg} ${getFloodColors(result.flood?.probability || 0).border} ${getFloodColors(result.flood?.probability || 0).text}`}>
-                    <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+                  {/* Flood */}
+                  <div className={`relative overflow-hidden rounded-xl p-5 shadow-xl border ${getFloodColors(result.flood?.probability || 0).bg} ${getFloodColors(result.flood?.probability || 0).border} ${getFloodColors(result.flood?.probability || 0).text}`}>
+                    <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
                     <div className="relative z-10">
-                      <div className="flex items-center gap-3 mb-3">
-                        <span className="text-2xl animate-pulse">🌊</span>
+                      <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
+                        <span className="text-2xl">🌊</span>
                         <div>
-                          <h5 className="font-bold text-lg">Flood Forecast</h5>
-                          <p className="text-xs opacity-80">Precipitation Risk Analysis</p>
+                          <h5 className="font-bold text-lg">Flood Threat</h5>
+                          <p className="text-xs opacity-80">Precipitation Analysis</p>
                         </div>
                       </div>
                       <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Risk Level:</span>
+                        <div className="flex justify-between items-center bg-black/20 p-2 rounded text-sm">
+                          <span>Risk Level:</span>
                           <span className="font-bold">{((result.flood?.probability || 0) * 100).toFixed(1)}%</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Classification:</span>
+                        <div className="flex justify-between items-center bg-black/20 p-2 rounded text-sm">
+                          <span>Status:</span>
                           <span className="font-semibold">{result.flood?.label || "Unknown"}</span>
                         </div>
-                        <div className={`w-full ${getFloodColors(result.flood?.probability || 0).bar} rounded-full h-3 overflow-hidden`}>
+                        <div className={`w-full ${getFloodColors(result.flood?.probability || 0).bar} rounded-full h-3 overflow-hidden border border-white/20`}>
                           <div 
                             className={`${getFloodColors(result.flood?.probability || 0).barFill} h-3 rounded-full transition-all duration-1000 ease-out shadow-lg`}
                             style={{ width: `${(result.flood?.probability || 0) * 100}%` }}
@@ -618,27 +921,27 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Wildfire Forecast */}
-                  <div className={`relative overflow-hidden rounded-xl p-5 shadow-lg border ${getWildfireColors(result.wildfire?.probability || 0).bg} ${getWildfireColors(result.wildfire?.probability || 0).border} ${getWildfireColors(result.wildfire?.probability || 0).text}`}>
-                    <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+                  {/* Fire */}
+                  <div className={`relative overflow-hidden rounded-xl p-5 shadow-xl border ${getWildfireColors(result.wildfire?.probability || 0).bg} ${getWildfireColors(result.wildfire?.probability || 0).border} ${getWildfireColors(result.wildfire?.probability || 0).text}`}>
+                    <div className="absolute inset-0 bg-black/20 backdrop-blur-sm"></div>
                     <div className="relative z-10">
-                      <div className="flex items-center gap-3 mb-3">
-                        <span className="text-2xl animate-pulse">🔥</span>
+                      <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
+                        <span className="text-2xl">🔥</span>
                         <div>
-                          <h5 className="font-bold text-lg">Fire Weather</h5>
-                          <p className="text-xs opacity-80">Wildfire Risk Analysis</p>
+                          <h5 className="font-bold text-lg">Fire Threat</h5>
+                          <p className="text-xs opacity-80">Wildfire Analysis</p>
                         </div>
                       </div>
                       <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Risk Level:</span>
+                        <div className="flex justify-between items-center bg-black/20 p-2 rounded text-sm">
+                          <span>Risk Level:</span>
                           <span className="font-bold">{((result.wildfire?.probability || 0) * 100).toFixed(1)}%</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Classification:</span>
+                        <div className="flex justify-between items-center bg-black/20 p-2 rounded text-sm">
+                          <span>Status:</span>
                           <span className="font-semibold">{result.wildfire?.label || "Unknown"}</span>
                         </div>
-                        <div className={`w-full ${getWildfireColors(result.wildfire?.probability || 0).bar} rounded-full h-3 overflow-hidden`}>
+                        <div className={`w-full ${getWildfireColors(result.wildfire?.probability || 0).bar} rounded-full h-3 overflow-hidden border border-white/20`}>
                           <div 
                             className={`${getWildfireColors(result.wildfire?.probability || 0).barFill} h-3 rounded-full transition-all duration-1000 ease-out shadow-lg`}
                             style={{ width: `${(result.wildfire?.probability || 0) * 100}%` }}
@@ -649,37 +952,37 @@ function App() {
                   </div>
                 </div>
 
-                {/* Weather Advisory */}
-                <div className="p-5 bg-gradient-to-br from-slate-100 to-gray-100 border border-gray-200 rounded-xl shadow-md">
-                  <div className="flex items-center gap-3 mb-3">
+                {/* Scale */}
+                <div className="p-5 bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-600/30 rounded-xl shadow-xl">
+                  <div className="flex items-center gap-3 mb-3 border-b border-slate-600/30 pb-2">
                     <span className="text-2xl">📊</span>
-                    <h5 className="font-bold text-gray-800">Risk Scale</h5>
+                    <h5 className="font-bold text-slate-200">Threat Scale</h5>
                   </div>
-                  <div className="space-y-2 text-sm text-gray-700">
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full"></div>
-                      <span><span className="font-semibold text-green-700">Clear (0-40%)</span> - Favorable conditions</span>
+                  <div className="space-y-2 text-sm text-slate-300">
+                    <div className="flex items-center gap-3 bg-emerald-900/30 p-2 rounded border border-emerald-800/30">
+                      <div className="w-4 h-4 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-full"></div>
+                      <span><span className="font-semibold text-emerald-400">Safe (0-40%)</span> - Minimal risk</span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full"></div>
-                      <span><span className="font-semibold text-yellow-700">Watch (40-70%)</span> - Monitor conditions</span>
+                    <div className="flex items-center gap-3 bg-amber-900/30 p-2 rounded border border-amber-800/30">
+                      <div className="w-4 h-4 bg-gradient-to-r from-amber-500 to-orange-600 rounded-full"></div>
+                      <span><span className="font-semibold text-amber-400">Alert (40-70%)</span> - Monitor closely</span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 bg-gradient-to-r from-red-500 to-red-700 rounded-full"></div>
-                      <span><span className="font-semibold text-red-700">Warning (&gt;70%)</span> - High risk zone</span>
+                    <div className="flex items-center gap-3 bg-rose-900/30 p-2 rounded border border-rose-800/30">
+                      <div className="w-4 h-4 bg-gradient-to-r from-rose-600 to-rose-800 rounded-full"></div>
+                      <span><span className="font-semibold text-rose-400">Danger (&gt;70%)</span> - Take action</span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Weather Station Quick Access */}
+            {/* Quick Access */}
             {!result && !loading && (
               <div className="space-y-4">
                 <div className="text-center">
-                  <h4 className="text-sm font-bold text-gray-600 mb-3 flex items-center justify-center gap-2">
-                    <span>🌟</span>
-                    MAJOR WEATHER STATIONS
+                  <h4 className="text-sm font-semibold text-blue-400 mb-3 flex items-center justify-center gap-2">
+                    <span>🎯</span>
+                    Quick Access Stations
                   </h4>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
@@ -687,12 +990,12 @@ function App() {
                     <button
                       key={city}
                       onClick={() => handleCitySelect(city)}
-                      className="p-3 bg-gradient-to-r from-white/80 to-gray-50/80 hover:from-blue-50/90 hover:to-blue-100/90 border border-gray-200 rounded-lg transition-all duration-300 text-left group shadow-sm hover:shadow-md"
+                      className="p-3 bg-gradient-to-r from-slate-800/90 to-slate-900/90 hover:from-slate-700/90 hover:to-slate-800/90 border border-slate-600/30 rounded-lg transition-all duration-300 text-left group shadow-lg hover:shadow-blue-900/30"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="text-blue-500 group-hover:scale-110 transition-transform">🏙️</span>
-                        <span className="text-gray-800 font-medium">{city}</span>
-                        <span className="ml-auto text-gray-400 group-hover:text-blue-500 transition-colors">→</span>
+                        <span className="text-blue-500 group-hover:scale-110 transition-transform">📍</span>
+                        <span className="text-slate-300 text-sm">{city}</span>
+                        <span className="ml-auto text-blue-500 group-hover:text-blue-400 transition-colors font-bold">›</span>
                       </div>
                     </button>
                   ))}
@@ -702,83 +1005,81 @@ function App() {
           </div>
         </aside>
 
-        {/* Main Weather Display */}
-        <main className="flex-1 flex flex-col bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
           {weatherData ? (
             <div className="flex-1 p-6 space-y-6 overflow-y-auto">
-              {/* Weather Charts Header */}
-              <div className="flex items-center justify-between">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-700/30 pb-4">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
-                    <span className="text-3xl">📈</span>
-                    Weather Analytics
+                  <h2 className="text-2xl font-bold text-blue-400 flex items-center gap-3">
+                    <span className="text-3xl">📊</span>
+                    Data Analytics
                   </h2>
-                  <p className="text-gray-600">Detailed weather patterns and forecasts</p>
+                  <p className="text-slate-400 text-sm">Real-time threat pattern analysis</p>
                 </div>
                 
-                {/* View Mode Toggle */}
-                <div className="flex bg-white/80 backdrop-blur-sm rounded-xl border border-gray-200 p-1 shadow-sm">
-  <button
-    onClick={() => setViewMode("hourly")}
-    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-      viewMode === "hourly"
-        ? "bg-blue-500 text-white shadow-md"
-        : "text-gray-600 hover:bg-gray-100"
-    }`}
-  >
-    24 Hours
-  </button>
-  <button
-    onClick={() => setViewMode("daily")}
-    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-      viewMode === "daily"
-        ? "bg-blue-500 text-white shadow-md"
-        : "text-gray-600 hover:bg-gray-100"
-    }`}
-  >
-    7 Days
-  </button>
-  <button
-    onClick={() => setViewMode("combined")}
-    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 ${
-      viewMode === "combined"
-        ? "bg-blue-500 text-white shadow-md"
-        : "text-gray-600 hover:bg-gray-100"
-    }`}
-  >
-    Past 2 Days
-  </button>
-</div>
-
+                {/* View Toggle */}
+                <div className="flex bg-slate-800/90 backdrop-blur-sm rounded-xl border border-slate-600/30 p-1 shadow-lg">
+                  <button
+                    onClick={() => setViewMode("hourly")}
+                    className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-300 ${
+                      viewMode === "hourly"
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+                    }`}
+                  >
+                    24 Hours
+                  </button>
+                  <button
+                    onClick={() => setViewMode("daily")}
+                    className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-300 ${
+                      viewMode === "daily"
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+                    }`}
+                  >
+                    7 Days
+                  </button>
+                  <button
+                    onClick={() => setViewMode("combined")}
+                    className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-300 ${
+                      viewMode === "combined"
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
+                    }`}
+                  >
+                    2D History
+                  </button>
+                </div>
               </div>
 
               {/* Temperature Chart */}
-              <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <div className="bg-slate-800/90 backdrop-blur-sm rounded-2xl border border-slate-600/50 p-6 shadow-xl">
+                <h3 className="text-lg font-bold text-blue-400 mb-4 flex items-center gap-2">
                   <span className="text-xl">🌡️</span>
-                  Temperature Trends
+                  Temperature Analysis
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={
-  viewMode === "hourly" ? hourlyData :
-  viewMode === "daily" ? dailyData :
-  prepareCombinedData()
-}>
-
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      viewMode === "hourly" ? hourlyData :
+                      viewMode === "daily" ? dailyData :
+                      prepareCombinedData()
+                    }>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
                       <XAxis 
                         dataKey={viewMode === "hourly" ? "time" : "date"} 
-                        stroke="#64748b"
+                        stroke="#94a3b8"
                         fontSize={12}
                       />
-                      <YAxis stroke="#64748b" fontSize={12} />
+                      <YAxis stroke="#94a3b8" fontSize={12} />
                       <Tooltip 
                         contentStyle={{ 
-                          backgroundColor: 'rgba(255, 255, 255, 0.95)', 
-                          border: 'none', 
+                          backgroundColor: 'rgba(15, 23, 42, 0.95)', 
+                          border: '1px solid #475569', 
                           borderRadius: '12px',
-                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)'
+                          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)'
                         }} 
                       />
                       <Legend />
@@ -797,17 +1098,17 @@ function App() {
                           <Line 
                             type="monotone" 
                             dataKey="maxTemp" 
-                            stroke="#ef4444" 
+                            stroke="#f97316" 
                             strokeWidth={3}
-                            dot={{ fill: '#ef4444', strokeWidth: 2, r: 4 }}
+                            dot={{ fill: '#f97316', strokeWidth: 2, r: 4 }}
                             name="Max Temp (°C)"
                           />
                           <Line 
                             type="monotone" 
                             dataKey="minTemp" 
-                            stroke="#3b82f6" 
+                            stroke="#06b6d4" 
                             strokeWidth={3}
-                            dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
+                            dot={{ fill: '#06b6d4', strokeWidth: 2, r: 4 }}
                             name="Min Temp (°C)"
                           />
                         </>
@@ -817,35 +1118,34 @@ function App() {
                 </div>
               </div>
 
-              {/* Weather Details Grid */}
+              {/* Environmental Metrics */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Humidity & Wind */}
-                <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <div className="bg-slate-800/90 backdrop-blur-sm rounded-2xl border border-slate-600/50 p-6 shadow-xl">
+                  <h3 className="text-lg font-bold text-blue-400 mb-4 flex items-center gap-2">
                     <span className="text-xl">💨</span>
                     Humidity & Wind
                   </h3>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={
-  viewMode === "hourly" ? hourlyData :
-  viewMode === "daily" ? dailyData :
-  prepareCombinedData()
-}>
-
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        viewMode === "hourly" ? hourlyData :
+                        viewMode === "daily" ? dailyData :
+                        prepareCombinedData()
+                      }>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
                         <XAxis 
                           dataKey={viewMode === "hourly" ? "time" : "date"} 
-                          stroke="#64748b"
+                          stroke="#94a3b8"
                           fontSize={12}
                         />
-                        <YAxis stroke="#64748b" fontSize={12} />
+                        <YAxis stroke="#94a3b8" fontSize={12} />
                         <Tooltip 
                           contentStyle={{ 
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)', 
-                            border: 'none', 
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)', 
+                            border: '1px solid #475569', 
                             borderRadius: '12px',
-                            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)'
+                            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)'
                           }} 
                         />
                         <Legend />
@@ -871,32 +1171,31 @@ function App() {
                 </div>
 
                 {/* Precipitation */}
-                <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <div className="bg-slate-800/90 backdrop-blur-sm rounded-2xl border border-slate-600/50 p-6 shadow-xl">
+                  <h3 className="text-lg font-bold text-blue-400 mb-4 flex items-center gap-2">
                     <span className="text-xl">🌧️</span>
                     Precipitation
                   </h3>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={
-  viewMode === "hourly" ? hourlyData :
-  viewMode === "daily" ? dailyData :
-  prepareCombinedData()
-}>
-
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        viewMode === "hourly" ? hourlyData :
+                        viewMode === "daily" ? dailyData :
+                        prepareCombinedData()
+                      }>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
                         <XAxis 
                           dataKey={viewMode === "hourly" ? "time" : "date"} 
-                          stroke="#64748b"
+                          stroke="#94a3b8"
                           fontSize={12}
                         />
-                        <YAxis stroke="#64748b" fontSize={12} />
+                        <YAxis stroke="#94a3b8" fontSize={12} />
                         <Tooltip 
                           contentStyle={{ 
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)', 
-                            border: 'none', 
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)', 
+                            border: '1px solid #475569', 
                             borderRadius: '12px',
-                            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)'
+                            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)'
                           }} 
                         />
                         <Legend />
@@ -920,102 +1219,106 @@ function App() {
                 </div>
               </div>
 
-              {/* Additional Weather Metrics */}
+              {/* Additional Metrics */}
               {weatherData.current && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl p-4 text-center shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-cyan-600/50 rounded-xl p-4 text-center shadow-lg">
                     <div className="text-2xl mb-2">👁️</div>
-                    <div className="text-sm text-blue-700 mb-1">Visibility</div>
-                    <div className="text-lg font-bold text-blue-900">{weatherData.current.vis_km} km</div>
+                    <div className="text-sm text-cyan-400 mb-1">Visibility</div>
+                    <div className="text-lg font-bold text-cyan-300">{weatherData.current.vis_km} km</div>
                   </div>
                   
-                  <div className="bg-gradient-to-br from-yellow-100 to-orange-200 rounded-xl p-4 text-center shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-orange-600/50 rounded-xl p-4 text-center shadow-lg">
                     <div className="text-2xl mb-2">☀️</div>
-                    <div className="text-sm text-orange-700 mb-1">UV Index</div>
-                    <div className="text-lg font-bold text-orange-900">{weatherData.current.uv}</div>
+                    <div className="text-sm text-orange-400 mb-1">UV Index</div>
+                    <div className="text-lg font-bold text-orange-300">{weatherData.current.uv ?? "N/A"}</div>
                   </div>
                   
-                  <div className="bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl p-4 text-center shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-500/50 rounded-xl p-4 text-center shadow-lg">
                     <div className="text-2xl mb-2">☁️</div>
-                    <div className="text-sm text-gray-700 mb-1">Cloud Cover</div>
-                    <div className="text-lg font-bold text-gray-900">{weatherData.current.cloud}%</div>
+                    <div className="text-sm text-slate-400 mb-1">Cloud Cover</div>
+                    <div className="text-lg font-bold text-slate-300">{weatherData.current.cloud}%</div>
                   </div>
                   
-                  <div className="bg-gradient-to-br from-green-100 to-teal-200 rounded-xl p-4 text-center shadow-sm">
+                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-emerald-600/50 rounded-xl p-4 text-center shadow-lg">
                     <div className="text-2xl mb-2">💨</div>
-                    <div className="text-sm text-teal-700 mb-1">Wind Gust</div>
-                    <div className="text-lg font-bold text-teal-900">{weatherData.current.gust_kph} km/h</div>
+                    <div className="text-sm text-emerald-400 mb-1">Wind Gust</div>
+                    <div className="text-lg font-bold text-emerald-300">{weatherData.current.gust_kph} km/h</div>
                   </div>
                 </div>
               )}
 
-{historyData && (
-  <div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg">
-    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-      <span className="text-xl">📜</span>
-      Past 2 Days Weather
-    </h3>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {historyData.map((day, i) => (
-        <div key={i} className="p-4 bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl shadow">
-          <div className="font-semibold text-gray-700">
-            {new Date(day.date).toLocaleDateString("en-US", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            })}
-          </div>
-          <div className="text-sm text-gray-600">
-            Min: {day.minTemp != null ? `${day.minTemp}°C` : "N/A"}
-          </div>
-          <div className="text-sm text-gray-600">
-            Max: {day.maxTemp != null ? `${day.maxTemp}°C` : "N/A"}
-          </div>
-          <div className="text-sm text-gray-600">
-            Humidity: {day.humidity != null ? `${day.humidity.toFixed(1)}%` : "N/A"}
-          </div>
-          <div className="text-sm text-gray-600">
-            Rain: {day.precipitation != null ? `${day.precipitation} mm` : "0 mm"}
-          </div>
-          <div className="text-sm text-gray-600">
-            Wind: {day.windSpeed != null ? `${day.windSpeed.toFixed(1)} km/h` : "N/A"}
-          </div>
-        </div>
-      ))}
-    </div>
+              {/* Historical Data
+              {historyData && (
+                <div className="bg-slate-800/90 backdrop-blur-sm rounded-2xl border border-slate-600/50 p-6 shadow-xl">
+                  <h3 className="text-lg font-bold text-blue-400 mb-4 flex items-center gap-2">
+                    <span className="text-xl">📜</span>
+                    Historical Data (48H)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {historyData.map((day, i) => (
+                      <div key={i} className="p-4 bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl shadow-lg border border-slate-700/20">
+                        <div className="font-semibold text-blue-300 mb-2">
+                          {new Date(day.date).toLocaleDateString("en-US", {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </div>
+                        <div className="text-sm text-slate-400 space-y-1">
+                          <div>Min: {day.minTemp != null ? `${day.minTemp}°C` : "N/A"}</div>
+                          <div>Max: {day.maxTemp != null ? `${day.maxTemp}°C` : "N/A"}</div>
+                          <div>Humidity: {day.humidity != null ? `${day.humidity.toFixed(1)}%` : "N/A"}</div>
+                          <div>Rain: {day.precipitation ?? day.precip ?? 0} mm</div>
+                          <div>Wind: {day.windSpeed != null ? `${day.windSpeed.toFixed(1)} km/h` : "N/A"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )} */}
+
+<div
+  className={`transition-all duration-300 ${
+    isMapExpanded
+      ? "fixed inset-0 z-50 bg-slate-900 p-4"
+      : "relative p-4 bg-slate-900/50 h-[400px]"
+  }`}
+>
+
+
+  <div className="flex justify-end mb-2">
+    <button
+      onClick={() => setIsMapExpanded(!isMapExpanded)}
+      className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-all"
+    >
+      {isMapExpanded ? "🔽 Collapse Map" : "🔼 Expand Map"}
+    </button>
   </div>
-)}
 
-
-
-              {/* Map View */}
-<div className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/50 p-6 shadow-lg h-96">
-  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-    <span className="text-xl">🗺️</span>
-    City Map
-  </h3>
-  <MapView result={result} />
+  <MapView result={result} isMapExpanded={isMapExpanded} />
 </div>
 
-            </div>
+</div>
+
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-6 max-w-md">
                 <div className="relative">
-                  <div className="text-8xl animate-bounce">🗺️</div>
-                  <div className="absolute -top-4 -right-4 text-3xl animate-pulse">☁️</div>
-                  <div className="absolute -bottom-2 -left-4 text-2xl animate-pulse delay-700">🌤️</div>
+                  <div className="text-8xl">🌍</div>
+                  <div className="absolute -top-4 -right-4 text-3xl">🔥</div>
+                  <div className="absolute -bottom-2 -left-4 text-2xl">🌊</div>
                 </div>
                 <div className="space-y-3">
-                  <h2 className="text-2xl font-bold text-gray-800">Welcome to EarthPulse</h2>
-                  <p className="text-gray-600 leading-relaxed">
-                    Your advanced weather monitoring system. Search for any city to view 
-                    real-time weather data, disaster risk forecasts, and detailed analytics.
+                  <h2 className="text-2xl font-bold text-blue-400">EarthPulse System</h2>
+                  <p className="text-slate-400 leading-relaxed text-sm">
+                    Advanced disaster prediction & monitoring system. Enter a location to initiate 
+                    real-time threat assessment, risk forecasting, and environmental analysis.
                   </p>
-                  <div className="flex items-center justify-center gap-4 text-sm text-gray-500 mt-4">
-                    <span className="flex items-center gap-1">🌊 Flood Tracking</span>
-                    <span className="flex items-center gap-1">🔥 Fire Monitoring</span>
-                    <span className="flex items-center gap-1">📈 Weather Analytics</span>
+                  <div className="flex items-center justify-center gap-4 text-sm text-slate-500 mt-4">
+                    <span className="flex items-center gap-1">🌊 Flood</span>
+                    <span className="flex items-center gap-1">🔥 Fire</span>
+                    <span className="flex items-center gap-1">📊 Analytics</span>
                   </div>
                 </div>
               </div>
@@ -1024,17 +1327,38 @@ function App() {
         </main>
       </div>
 
-      {/* Weather Station Footer */}
-      <footer className="bg-gradient-to-r from-slate-800 to-gray-900 p-4 text-center text-white/80 text-sm border-t border-gray-700 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20"></div>
+      {/* Toasts */}
+      <div className="fixed top-6 right-6 z-50 space-y-3 w-80">
+        {toasts.map(t => (
+          <div key={t.id} className="bg-slate-900/98 border border-blue-600/50 rounded-lg p-4 shadow-2xl relative backdrop-blur-sm">
+            <button
+              aria-label="Close notification"
+              onClick={() => removeToast(t.id)}
+              className="absolute top-2 right-2 text-blue-400 hover:text-blue-300 text-xl"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+            >
+              ×
+            </button>
+            <div className="font-semibold text-blue-400">{t.title}</div>
+            <div className="text-slate-400 text-sm">{t.body}</div>
+          </div>
+        ))}
+      </div>
+
+      <footer className="bg-gradient-to-r from-slate-800 via-slate-900 to-slate-800 p-3 text-center text-slate-400 text-xs border-t border-slate-700/50 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 to-cyan-600/5"></div>
         <div className="relative z-10 flex items-center justify-center gap-2">
-          <span className="animate-pulse">⛈️</span>
-          <span>© 2025 EarthPulse — Advanced Meteorological Risk Assessment Platform</span>
-          <span className="animate-pulse">⛈️</span>
+          <span className="text-sm">🌍</span>
+          <span>© 2025 EarthPulse - Disaster Monitoring System</span>
+          <span className="text-sm">🌍</span>
         </div>
       </footer>
     </div>
   );
+
+
+
+
 }
 
 export default App;

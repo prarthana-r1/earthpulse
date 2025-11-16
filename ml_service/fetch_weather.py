@@ -20,7 +20,17 @@ locations = [
     {"name": "Ahmedabad", "lat": 23.0225, "lon": 72.5714},
     {"name": "Jaipur", "lat": 26.9124, "lon": 75.7873},
     {"name": "Lucknow", "lat": 26.8467, "lon": 80.9462},
-    {"name": "Guwahati", "lat": 26.1445, "lon": 91.7362}
+    {"name": "Guwahati", "lat": 26.1445, "lon": 91.7362},
+    {"name": "Pune", "lat": 18.5204, "lon": 73.8567},
+    {"name": "Kochi", "lat": 9.9312, "lon": 76.2673},
+    {"name": "Bhopal", "lat": 23.2599, "lon": 77.4126},
+    {"name": "Indore", "lat": 22.7196, "lon": 75.8577},
+    {"name": "Patna", "lat": 25.5941, "lon": 85.1376},
+    {"name": "Visakhapatnam", "lat": 17.6868, "lon": 83.2185},
+    {"name": "Srinagar", "lat": 34.0837, "lon": 74.7973},
+    {"name": "Ranchi", "lat": 23.3441, "lon": 85.3096},
+    {"name": "Chandigarh", "lat": 30.7333, "lon": 76.7794},
+    {"name": "Thiruvananthapuram", "lat": 8.5241, "lon": 76.9366}
 ]
 
 
