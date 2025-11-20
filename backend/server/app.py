@@ -20,7 +20,7 @@ PUSH_MODULE = None
 PUSH_IMPORT_ERROR = None
 PUSH_AVAILABLE = False
 
-
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 def ensure_push():
     """Attempt to import pywebpush and populate PUSH_MODULE/PUSH_AVAILABLE.
@@ -815,6 +815,181 @@ out geom;
         
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+@app.get('/google/nearby_ngos')
+def google_nearby_ngos():
+    lat = float(request.args.get("lat"))
+    lon = float(request.args.get("lon"))
+    radius = 5000
+
+    url = "https://places.googleapis.com/v1/places:searchNearby"
+
+    payload = {
+        "includedTypes": ["non_profit", "point_of_interest", "foundation"],
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lon},
+                "radius": radius
+            }
+        }
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_API_KEY,
+        "X-Goog-FieldMask":
+            "places.id,places.displayName,places.location,"
+            "places.formattedAddress,places.websiteUri,"
+            "places.internationalPhoneNumber"
+    }
+
+    r = requests.post(url, json=payload, headers=headers)
+    data = r.json()
+
+    results = []
+    for p in data.get("places", []):
+        results.append({
+            "place_id": p.get("id"),
+            "name": p.get("displayName", {}).get("text"),
+            "geometry": {
+                "location": {
+                    "lat": p.get("location", {}).get("latitude"),
+                    "lng": p.get("location", {}).get("longitude"),
+                }
+            },
+            "vicinity": p.get("formattedAddress"),
+            "website": p.get("websiteUri"),
+
+            # PHONE FIXED — 3 aliases
+            "phone": p.get("internationalPhoneNumber"),
+            "international_phone": p.get("internationalPhoneNumber"),
+            "international_phone_number": p.get("internationalPhoneNumber"),
+        })
+
+    return jsonify({"results": results})
+
+
+
+
+@app.get("/google/nearby")
+def google_nearby():
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    if lat is None or lon is None:
+        return jsonify({"error": "lat & lon required"}), 400
+
+    url = "https://places.googleapis.com/v1/places:searchNearby"
+
+    payload = {
+        "includedTypes": ["non_profit"],
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lon},
+                "radius": 5000
+            }
+        }
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_API_KEY,
+        "X-Goog-FieldMask": (
+            "places.id,places.displayName,places.formattedAddress,"
+            "places.location,places.websiteUri,places.rating,"
+            "places.internationalPhoneNumber"
+        )
+    }
+
+    resp = requests.post(url, json=payload, headers=headers)
+    data = resp.json()
+
+    # ⭐ Convert to old format
+    results = []
+    for p in data.get("places", []):
+        results.append({
+            "place_id": p.get("id"),
+            "name": p.get("displayName", {}).get("text"),
+            "geometry": {
+                "location": {
+                    "lat": p.get("location", {}).get("latitude"),
+                    "lng": p.get("location", {}).get("longitude")
+                }
+            },
+            "rating": p.get("rating"),
+            "website": p.get("websiteUri"),
+            "international_phone": p.get("internationalPhoneNumber")
+        })
+
+    return jsonify({"results": results})
+
+
+
+@app.get("/google/details")
+def google_details():
+    place_id = request.args.get("place_id")
+    key = GOOGLE_API_KEY
+
+    if not place_id:
+        return jsonify({"error": "place_id required"}), 400
+
+    url = f"https://places.googleapis.com/v1/places/{place_id}"
+
+    headers = {
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask":
+            "id,displayName,formattedAddress,websiteUri,internationalPhoneNumber"
+    }
+
+    r = requests.get(url, headers=headers)
+    p = r.json()
+
+    # ⭐ Convert to the old Places JSON format your frontend expects
+    return jsonify({
+        "result": {
+            "formatted_phone_number": p.get("internationalPhoneNumber"),
+            "website": p.get("websiteUri"),
+            "formatted_address": p.get("formattedAddress"),
+            "name": p.get("displayName", {}).get("text")
+        }
+    })
+
+
+
+@app.get("/google/search")
+def google_search():
+    query = request.args.get("name")
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+    key = GOOGLE_API_KEY
+
+    print("SEARCH lat:", lat, "lon:", lon)
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+
+    payload = {
+        "textQuery": query,
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lon},
+                "radius": 5000
+            }
+        }
+    }
+    print("PAYLOAD:", payload)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask":
+            "places.id,places.displayName,"
+            "places.formattedAddress,places.websiteUri,"
+            "places.internationalPhoneNumber,places.location"
+    }
+
+    r = requests.post(url, json=payload, headers=headers)
+    return jsonify(r.json())
+
+
 
 
 
