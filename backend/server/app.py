@@ -22,6 +22,10 @@ PUSH_AVAILABLE = False
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY")
+ALERT_PHONE = os.getenv("ALERT_PHONE")
+
+
 def ensure_push():
     """Attempt to import pywebpush and populate PUSH_MODULE/PUSH_AVAILABLE.
     Safe to call multiple times."""
@@ -605,6 +609,30 @@ def _should_send_alert(key: str) -> bool:
 def _mark_alert_sent(key: str):
     _last_alert_sent[key] = time.time()
 
+
+
+from requests.utils import quote
+
+def send_alert_sms(alert_msg: str):
+    url = "https://www.fast2sms.com/dev/bulkV2"
+
+    payload = {
+        "message": alert_msg,
+        "language": "english",
+        "route": "q",
+        "numbers": ALERT_PHONE
+    }
+
+    headers = {
+        "authorization": FAST2SMS_API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    response = requests.post(url, data=payload, headers=headers)
+    print("SMS Response:", response.json())
+
+
+
 def periodic_risk_check():
     app.logger.info("💡 Scheduler heartbeat: checking risk at %s", datetime.now().strftime("%H:%M:%S"))
     app.logger.info("Periodic risk check started")
@@ -623,9 +651,15 @@ def periodic_risk_check():
                 key = f"{city}:flood"
                 if _should_send_alert(key):
                     title = f"{city}: HIGH Flood Risk"
-                    body  = f"Flood probability {(float(flood_prob)*100):.0f}% — take precautions."
+                    body = (
+                        f"[EarthPulse Alert]\n"
+                        f"City: {city}\n"
+                        f"Flood Risk: {(float(flood_prob)*100):.0f}%\n"
+                        f"Stay alert and avoid low-lying areas."
+                    )
                     tag = f"earthpulse:{city}:flood:{int(time.time())}"
                     requests.post(f"{INTERNAL_BASE_URL}/push/test", json={"title": title, "body": body, "tag": tag}, timeout=30)
+                    send_alert_sms(body)
                     _mark_alert_sent(key)
                     app.logger.info(f"Auto-alert flood for {city} sent")
 
@@ -634,9 +668,15 @@ def periodic_risk_check():
                 key = f"{city}:fire"
                 if _should_send_alert(key):
                     title = f"{city}: HIGH Fire Risk"
-                    body  = f"Fire probability {(float(fire_prob)*100):.0f}% — exercise caution."
+                    body = (
+                        f"[EarthPulse Alert]\n"
+                        f"City: {city}\n"
+                        f"Wildfire Risk: {(float(fire_prob)*100):.0f}%\n"
+                        f"Exercise caution and avoid dry vegetation."
+                    )
                     tag = f"earthpulse:{city}:fire:{int(time.time())}"
                     requests.post(f"{INTERNAL_BASE_URL}/push/test", json={"title": title, "body": body, "tag": tag}, timeout=30)
+                    send_alert_sms(body)
                     _mark_alert_sent(key)
                     app.logger.info(f"Auto-alert fire for {city} sent")
 
@@ -991,7 +1031,369 @@ def google_search():
 
 
 
+import os
+import uuid
+import tempfile
+import traceback
+from io import BytesIO
+from datetime import datetime
+import matplotlib.pyplot as plt
 
+from fpdf import FPDF
+from flask import send_file, request, current_app
+import requests
+from PIL import Image
+
+
+@app.get("/download_report")
+def download_report():
+    """
+    EarthPulse — Professional Graphical PDF Report
+    """
+
+    # -------------------------------
+    # 1. FETCH DATA
+    # -------------------------------
+    city = request.args.get("city")
+    if not city:
+        return {"error": "City is required"}, 400
+
+    try:
+        pred = requests.get(f"{INTERNAL_BASE_URL}/predict", params={"city": city}, timeout=10).json()
+        weather = requests.get(f"{INTERNAL_BASE_URL}/weather", params={"city": city}, timeout=10).json()
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+    cur = weather.get("current", {})
+    forecast = weather.get("forecast", {}).get("forecastday", [])
+
+    flood = pred.get("flood", {"probability": 0, "label": "N/A"})
+    wildfire = pred.get("wildfire", {"probability": 0, "label": "N/A"})
+
+    # -------------------------------
+    # 2. GENERATE CHART IMAGES
+    # -------------------------------
+    tmp_files = []
+
+    def temp_file():
+        fd, path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        tmp_files.append(path)
+        return path
+
+    # Temperature chart
+    temp_chart = None
+    try:
+        dates = [d.get("date", "") for d in forecast]
+        tmin = [d["day"].get("mintemp_c", 0) for d in forecast]
+        tmax = [d["day"].get("maxtemp_c", 0) for d in forecast]
+
+        if dates:
+            fig, ax = plt.subplots(figsize=(6, 3.2))
+            ax.plot(dates, tmin, marker="o", label="Min Temp")
+            ax.plot(dates, tmax, marker="o", label="Max Temp")
+            ax.set_title("7-Day Temperature Trend")
+            ax.set_ylabel("°C")
+            ax.grid(True, linewidth=0.3)
+            ax.legend()
+
+            plt.xticks(rotation=45, fontsize=8)
+            ax.tick_params(axis="y", labelsize=8)
+
+            fig.tight_layout()
+
+            temp_chart = temp_file()
+            fig.savefig(temp_chart, dpi=150)
+            plt.close(fig)
+    except:
+        pass
+
+    # Rain chart
+    rain_chart = None
+    try:
+        rain = [d["day"].get("daily_chance_of_rain", 0) for d in forecast]
+        if dates:
+            fig, ax = plt.subplots(figsize=(6, 3.2))
+            ax.bar(dates, rain, color="#4A90E2")
+            ax.set_title("7-Day Rain Probability")
+            ax.set_ylabel("%")
+            ax.set_ylim(0, 100)
+            ax.grid(axis="y", linewidth=0.3)
+
+            plt.xticks(rotation=45, fontsize=8)
+            ax.tick_params(axis="y", labelsize=8)
+
+            fig.tight_layout()
+
+            rain_chart = temp_file()
+            fig.savefig(rain_chart, dpi=150)
+            plt.close(fig)
+    except:
+        pass
+
+    # -------------------------------
+    # 3. BUILD PDF
+    # -------------------------------
+    pdf = FPDF("P", "mm", "A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+
+    
+    def draw_page_border():
+        pdf.set_draw_color(180, 180, 180)   # light grey
+        pdf.set_line_width(0.8)
+        pdf.rect(5, 5, 200, 287)            # (x, y, width, height)
+
+
+    pdf.add_page()
+    draw_page_border()
+
+
+    # Load fonts
+    # Load fonts
+    try:
+        pdf.add_font("DejaVu", "", "fonts/DejaVuSans.ttf", uni=True)
+        pdf.add_font("DejaVu", "B", "fonts/DejaVuSans-Bold.ttf", uni=True)
+        pdf.add_font("DejaVu", "I", "fonts/DejaVuSans-Oblique.ttf", uni=True)  # <-- REQUIRED
+        pdf.set_font("DejaVu", "", 11)
+    except:
+        pdf.set_font("Arial", "", 11)
+
+
+    # Title
+    pdf.set_font("DejaVu", "B", 18)
+    pdf.set_text_color(30, 144, 255)
+    pdf.cell(0, 10, f"🌍 EarthPulse Disaster Report — {city}", ln=True)
+    pdf.ln(2)
+
+    pdf.set_font("DejaVu", "", 11)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True)
+    pdf.ln(4)
+
+    # -------------------------------
+    # Section helper
+    # -------------------------------
+    def section(title, fill=(160, 30, 30)):
+        pdf.set_font("DejaVu", "B", 14)
+        pdf.set_fill_color(*fill)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 10, f"  {title}", ln=True, fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+    # -------------------------------
+    # RISK BAR
+    # -------------------------------
+    def draw_risk(label, prob):
+        pct = int(prob * 100)
+        bar_w = 120
+        bar_h = 8
+
+        # color scale
+        if pct < 30:
+            color = (0, 200, 0)
+        elif pct < 60:
+            color = (255, 215, 0)
+        elif pct < 80:
+            color = (255, 165, 0)
+        else:
+            color = (255, 60, 60)
+
+        pdf.set_font("DejaVu", "B", 11)
+        pdf.cell(0, 6, f"{label}: {pct}%", ln=True)
+
+        x = pdf.get_x()
+        y = pdf.get_y()
+
+        # background
+        pdf.set_fill_color(230, 230, 230)
+        pdf.rect(x, y, bar_w, bar_h, "F")
+
+        # bar
+        pdf.set_fill_color(*color)
+        pdf.rect(x, y, bar_w * pct / 100, bar_h, "F")
+
+        pdf.ln(bar_h + 4)
+
+    # -------------------------------
+    # CURRENT WEATHER
+    # -------------------------------
+    section("Current Weather", (30, 100, 160))
+    pdf.set_font("DejaVu", "", 11)
+    pdf.multi_cell(0, 6,
+        f"Temperature: {cur.get('temp_c')}°C (Feels like {cur.get('feelslike_c')}°C)\n"
+        f"Humidity: {cur.get('humidity')}%\n"
+        f"Wind: {cur.get('wind_kph')} km/h ({cur.get('wind_dir')})\n"
+        f"Visibility: {cur.get('vis_km')} km\n"
+        f"Pressure: {cur.get('pressure_mb')} mb"
+    )
+    pdf.ln(2)
+
+    # -------------------------------
+    # RISK SECTION
+    # -------------------------------
+    section("Disaster Risk Assessment")
+
+    draw_risk("Flood Risk", flood["probability"])
+    draw_risk("Wildfire Risk", wildfire["probability"])
+
+    # -------------------------------
+    # 24-HOUR SNAPSHOT
+    # -------------------------------
+    section("24-Hour Snapshot", (80, 80, 80))
+
+    hours = forecast[0].get("hour", [])[:12] if forecast else []
+
+    pdf.set_font("DejaVu", "B", 10)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(45, 7, "Time", 1, 0, "C", True)
+    pdf.cell(40, 7, "Temp", 1, 0, "C", True)
+    pdf.cell(30, 7, "Rain%", 1, 1, "C", True)
+
+    pdf.set_font("DejaVu", "", 10)
+
+    for h in hours:
+        # Clean and safe timestamp
+        t = h.get("time", "").replace("T", " ").replace("+00:00", "")
+
+        temp = f"{h.get('temp_c', 'N/A')}°C"
+        rain = f"{h.get('chance_of_rain', 'N/A')}%"
+
+        pdf.set_font("DejaVu", "", 10)
+
+        pdf.cell(45, 7, t, border=1)
+        pdf.cell(40, 7, temp, border=1)
+        pdf.cell(30, 7, rain, border=1)
+        pdf.ln(7)
+
+# *** IMPORTANT: add spacing before next section ***
+    pdf.ln(5)
+
+
+    # -------------------------------
+    # 7-DAY TABLE
+    # -------------------------------
+    section("7-Day Forecast", (50, 50, 50))
+
+    pdf.set_font("DejaVu", "B", 10)
+    pdf.set_fill_color(235, 235, 235)
+    pdf.cell(30, 8, "Date", 1, 0, "C", True)
+    pdf.cell(65, 8, "Condition", 1, 0, "C", True)
+    pdf.cell(25, 8, "Min°", 1, 0, "C", True)
+    pdf.cell(25, 8, "Max°", 1, 0, "C", True)
+    pdf.cell(25, 8, "Rain%", 1, 1, "C", True)
+
+    pdf.set_font("DejaVu", "", 10)
+
+    for d in forecast:
+        day = d["day"]
+        pdf.cell(30, 8, d["date"], 1)
+        pdf.cell(65, 8, day["condition"]["text"][:30], 1)
+        pdf.cell(25, 8, str(day["mintemp_c"]), 1)
+        pdf.cell(25, 8, str(day["maxtemp_c"]), 1)
+        pdf.cell(25, 8, str(day["daily_chance_of_rain"]), 1)
+        pdf.ln()
+
+    # -------------------------------
+    # INSERT CHARTS
+    # -------------------------------
+    def insert_chart(path, title):
+        if not os.path.exists(path):
+            return
+
+        # --- If space is low, add new page + border ---
+        if pdf.get_y() > 180:   # 200 is too late, 180 is safer
+            pdf.add_page()
+            draw_page_border()
+
+        # --- Section Title ---
+        pdf.set_font("DejaVu", "B", 14)
+        pdf.cell(0, 8, title, ln=True)
+
+        img_w, img_h = 170, 90
+        x = (210 - img_w) / 2
+        y = pdf.get_y() + 3
+
+        # Chart border box
+        pdf.set_draw_color(120, 120, 120)
+        pdf.rect(x - 2, y - 2, img_w + 4, img_h + 4)
+
+        # Insert chart
+        pdf.image(path, x=x, y=y, w=img_w, h=img_h)
+
+        # Move down BELOW chart
+        pdf.ln(img_h + 16)
+
+        # ⭐ IMPORTANT:
+        # If auto-page-break occurred during chart insert,
+        # the cursor will jump to the top of the new page (small Y value).
+        # That means we MUST draw a border on that new page.
+        if pdf.get_y() < 20:  
+            draw_page_border()
+
+
+    insert_chart(temp_chart, "7-Day Temperature Trend")
+    insert_chart(rain_chart, "7-Day Rain Probability")
+
+
+    def add_footer():
+        # Always disable auto-page break during footer creation
+        auto_break = pdf.auto_page_break
+        pdf.set_auto_page_break(False)
+
+        # Move cursor to safe bottom position INSIDE border
+        pdf.set_y(265)   # ~275 is too close; 265 is safer
+
+        # Draw footer text as a single block
+        pdf.set_font("DejaVu", "I", 10)
+        pdf.set_text_color(90, 90, 90)
+        pdf.cell(0, 6, '"Preparedness today ensures safety tomorrow."', ln=True, align="C")
+
+        pdf.set_font("DejaVu", "B", 11)
+        pdf.set_text_color(60, 60, 60)
+        pdf.cell(0, 6, "— Team EarthPulse", ln=True, align="C")
+
+        # Restore page-break setting
+        pdf.set_auto_page_break(auto_break, margin=12)
+
+
+
+    # -------------------------------
+    # ACTION PLAN
+    # -------------------------------
+    pdf.add_page()
+    draw_page_border()
+    section("Preparedness & Action Plan", (30, 144, 255))
+    pdf.set_font("DejaVu", "", 11)
+    pdf.multi_cell(0, 6,
+        "• Prepare emergency kit: water, flashlight, medicines.\n"
+        "• Avoid low-lying areas during heavy rainfall.\n"
+        "• Keep communication devices charged.\n"
+        "• Follow official alerts from authorities.\n"
+        "• Avoid dry vegetation during wildfire warnings."
+    )
+    add_footer()
+
+
+    # -------------------------------
+    # RETURN PDF
+    # -------------------------------
+    out = BytesIO()
+    pdf.output(out)
+    out.seek(0)
+
+    for f in tmp_files:
+        try:
+            os.remove(f)
+        except:
+            pass
+
+    return send_file(
+        out,
+        download_name=f"EarthPulse_Report_{city}.pdf",
+        as_attachment=True,
+        mimetype="application/pdf"
+    )
 
 
 

@@ -642,26 +642,43 @@ return (
             </div>
           </div>
       
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => getCurrentLocation(true)}
-              disabled={locationLoading}
-              className="flex items-center gap-2 bg-slate-700/60 hover:bg-slate-600/60 backdrop-blur-sm border border-slate-600/50 rounded-lg px-3 py-2 transition-all duration-200 disabled:opacity-50 text-sm font-medium"
-            >
-              <span className={`text-base ${locationLoading ? 'animate-spin' : ''}`}>
-                {locationLoading ? '🔄' : '📍'}
-              </span>
-            </button>
+<div className="flex items-center gap-2">
 
-            <div className="flex items-center gap-2 bg-slate-700/40 border border-slate-600/40 rounded-lg px-2 py-1 text-xs">
-              <button
-                disabled
-                className="px-2 py-1 rounded-md text-xs font-semibold bg-blue-600/80 text-white"
-              >
-                🔔
-              </button>
-            </div>
-          </div>
+  {/* DOWNLOAD BUTTON */}
+  <button
+    onClick={() => {
+      if (!selected) return alert("Please select a city first.");
+      window.open(`${BACKEND_URL}/download_report?city=${selected}`, "_blank");
+    }}
+    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 backdrop-blur-sm border border-indigo-500/50 rounded-lg px-3 py-2 transition-all duration-200 text-sm font-medium text-white"
+  >
+    ⬇ Download
+  </button>
+
+  {/* LOCATION BUTTON */}
+  <button
+    onClick={() => getCurrentLocation(true)}
+    disabled={locationLoading}
+    className="flex items-center gap-2 bg-slate-700/60 hover:bg-slate-600/60 backdrop-blur-sm border border-slate-600/50 rounded-lg px-3 py-2 transition-all duration-200 disabled:opacity-50 text-sm font-medium"
+  >
+    <span className={`text-base ${locationLoading ? 'animate-spin' : ''}`}>
+      {locationLoading ? '🔄' : '📍'}
+    </span>
+  </button>
+
+  {/* ALERT BUTTON */}
+  <div className="flex items-center gap-2 bg-slate-700/40 border border-slate-600/40 rounded-lg px-2 py-1 text-xs">
+    <button
+      disabled
+      className="px-2 py-1 rounded-md text-xs font-semibold bg-blue-600/80 text-white"
+    >
+      🔔
+    </button>
+  </div>
+
+</div>
+
+
         </div>
       </header>
 
@@ -1286,18 +1303,23 @@ return (
   }`}
 >
 
+  {/* TOP RIGHT BUTTON BAR (same structure, only extended) */}
+  <div className="flex justify-between items-center mb-2">
 
-  <div className="flex justify-end mb-2">
+    {/* EXISTING MAP EXPAND BUTTON — UNCHANGED */}
     <button
       onClick={() => setIsMapExpanded(!isMapExpanded)}
       className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-all"
     >
       {isMapExpanded ? "🔽 Collapse Map" : "🔼 Expand Map"}
     </button>
+
   </div>
 
+  {/* MAP COMPONENT */}
   <MapView result={result} isMapExpanded={isMapExpanded} />
 </div>
+
 
 </div>
 
