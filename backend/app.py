@@ -77,8 +77,38 @@ OPENWEATHER_ONECALL = "https://api.openweathermap.org/data/2.5/onecall"
 OPENWEATHER_GEOCODE = "https://api.openweathermap.org/geo/1.0/direct"
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-DEFAULT_FLOOD_MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ml_service/models/flood_model.keras"))
-DEFAULT_WILDFIRE_MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ml_service/models/wildfire_model.keras"))
+# ----------------------------------------
+# Load TensorFlow Models (Local Dev) OR use HuggingFace Models (Production)
+# ----------------------------------------
+LOCAL_ML = True
+HF_ML = False
+
+HF_FLOOD_URL = f"{ML_API_URL}/predict_flood"
+HF_FIRE_URL  = f"{ML_API_URL}/predict_fire"
+
+HF_HEADERS = {
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def hf_predict(model_url, features):
+    """Call HuggingFace Space model with JSON payload."""
+    payload = {"inputs": features}
+    r = requests.post(model_url, json=payload, headers=HF_HEADERS, timeout=30)
+    r.raise_for_status()
+    return float(r.json().get("score", 0.0))
+
+
+try:
+    FLOOD_MODEL, FLOOD_FEATS = load_model_and_features(DEFAULT_FLOOD_MODEL)
+    WILDFIRE_MODEL, WILDFIRE_FEATS = load_model_and_features(DEFAULT_WILDFIRE_MODEL)
+    print("✔ Loaded Local TensorFlow Models")
+except Exception as e:
+    print("⚠ Local models not found → Using HuggingFace Models Instead")
+    FLOOD_MODEL, FLOOD_FEATS = None, []
+    WILDFIRE_MODEL, WILDFIRE_FEATS = None, []
+    LOCAL_ML = False
+    HF_ML = True
 
 
 # --- Helpers ---
@@ -258,8 +288,13 @@ def predict():
         X_flood = prepare_features_for_model(lat, lon, FLOOD_FEATS).values.astype("float32")
         X_fire = prepare_features_for_model(lat, lon, WILDFIRE_FEATS).values.astype("float32")
 
-        flood_prob = float(FLOOD_MODEL.predict(X_flood, verbose=0)[0][0]) if FLOOD_FEATS else None
-        fire_prob = float(WILDFIRE_MODEL.predict(X_fire, verbose=0)[0][0]) if WILDFIRE_FEATS else None
+        if LOCAL_ML:
+            flood_prob = float(FLOOD_MODEL.predict(X_flood, verbose=0)[0][0])
+            fire_prob = float(WILDFIRE_MODEL.predict(X_fire, verbose=0)[0][0])
+        else:
+            flood_prob = hf_predict(HF_FLOOD_URL, X_flood.flatten().tolist())
+            fire_prob = hf_predict(HF_FIRE_URL, X_fire.flatten().tolist())
+
 
     flood_label = "High" if (flood_prob is not None and flood_prob >= 0.5) else "Low"
     fire_label = "High" if (fire_prob is not None and fire_prob >= 0.5) else "Low"
