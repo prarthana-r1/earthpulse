@@ -25,6 +25,28 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY")
 ALERT_PHONE = os.getenv("ALERT_PHONE")
 
+ML_API_URL = os.getenv("ML_API_URL")
+HF_TOKEN= os.getenv("HF_TOKEN")
+
+def call_ml_server(city=None, lat=None, lon=None):
+    url = f"{ML_API_URL}/predict"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('HF_TOKEN')}"
+    }
+
+    payload = {}
+    if city:
+        payload["city"] = city
+    if lat is not None and lon is not None:
+        payload["lat"] = lat
+        payload["lon"] = lon
+
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 
 def ensure_push():
     """Attempt to import pywebpush and populate PUSH_MODULE/PUSH_AVAILABLE.
@@ -197,17 +219,28 @@ def predict():
     Query parameters:
       - city=Name  OR lat=..&lon=..
       - optional: flood_model, wildfire_model (paths)
+      - use_hf=true → force use HuggingFace ML API
     """
     city = request.args.get("city")
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
 
+    # NEW → If use_hf=true, bypass local models and call HuggingFace
+    use_hf = request.args.get("use_hf")
+    if use_hf == "true":
+        try:
+            return jsonify(call_ml_server(city=city, lat=lat, lon=lon))
+        except Exception as e:
+            return jsonify({"error": f"HuggingFace error: {str(e)}"}), 500
+
+    # --------------------------------------------------------
+    # ORIGINAL LOGIC (unchanged)
+    # --------------------------------------------------------
+
     # resolve coords
     if city:
-        # Special test city: Floodville -> return canned high-flood coordinates/result
         if city.strip().lower() == 'floodville':
             lat, lon = 12.9716, 77.5946
-            # return a quick canned response (we still construct full output below after model/pred)
         else:
             try:
                 lat, lon = geocode_city(city)
@@ -218,7 +251,6 @@ def predict():
             return jsonify({"error": "Provide --city or (lat & lon)"}), 400
 
     # prepare features and predict
-    # If Floodville, bypass model and return a high flood probability for testing
     if city and city.strip().lower() == 'floodville':
         flood_prob = 0.95
         fire_prob = 0.05
@@ -232,9 +264,8 @@ def predict():
     flood_label = "High" if (flood_prob is not None and flood_prob >= 0.5) else "Low"
     fire_label = "High" if (fire_prob is not None and fire_prob >= 0.5) else "Low"
 
-    # Also return latest raw weather snapshot for convenience
+    # latest weather snapshot
     if city and city.strip().lower() == 'floodville':
-        # Create a simple synthetic weather dataframe-like dict for latest snapshot
         latest_weather = {
             "time": datetime.now(timezone.utc).isoformat(),
             "temp_c": 25.0,
@@ -251,7 +282,7 @@ def predict():
         "coordinates": {"latitude": lat, "longitude": lon},
         "weather": latest_weather,
         "wildfire": {"probability": fire_prob, "label": fire_label},
-        "flood": {"probability": flood_prob, "label": flood_label}
+        "flood": {"probability": flood_prob, "label": flood_label},
     }
     return jsonify(out)
 
