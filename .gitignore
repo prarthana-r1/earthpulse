@@ -19,6 +19,9 @@ venv/
 .env
 .env.*
 **/venv/
+venv/
+backend/venv/
+
 
 # Build outputs
 dist/
