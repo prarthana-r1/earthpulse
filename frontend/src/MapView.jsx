@@ -159,7 +159,7 @@ async function getGooglePlaceId(ngo) {
   const key = `${ngo.name}__${ngo.lat}__${ngo.lon}`;
   if (placeIdCache.current.has(key)) return placeIdCache.current.get(key);
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL;
+  
   try {
     const res = await fetch(`${BACKEND}/google/search?name=${encodeURIComponent(ngo.name)}&lat=${ngo.lat}&lon=${ngo.lon}`);
     const data = await res.json();
@@ -180,8 +180,6 @@ async function getGooglePlaceId(ngo) {
   const fetchGoogleNgos = async (lat, lon) => {
   try {
     const radius = 5000; // 5 km
-
-    const BACKEND = import.meta.env.VITE_BACKEND_URL;
 
 const res = await fetch(
   `${BACKEND}/google/nearby_ngos?lat=${lat}&lon=${lon}`
@@ -218,7 +216,7 @@ const res = await fetch(
 // FETCH GOOGLE DETAILS — call your backend proxy (no CORS)
 const fetchGoogleNgoDetails = async (placeId) => {
   try {
-    const BACKEND = import.meta.env.VITE_BACKEND_URL;
+  
 
     const res = await fetch(`${BACKEND}/google/details?place_id=${placeId}`);
     const data = await res.json();
@@ -530,7 +528,6 @@ setEocs(facilities.eocs);
     // ----------------------------
     // 2. Fetch Google Nearby NGOs
     // ----------------------------
-    const BACKEND = import.meta.env.VITE_BACKEND_URL;
     const googleResp = await fetch(
       `${BACKEND}/google/nearby_ngos?lat=${coords[0]}&lon=${coords[1]}`
     );
@@ -903,7 +900,6 @@ for (const osm of osmNgos) {
 
   // If no Place ID found → try searching Google by name
   if (!placeId) {
-    const BACKEND = import.meta.env.VITE_BACKEND_URL;
     const s = await fetch(`${BACKEND}/google/search?name=${encodeURIComponent(ngo.name)}&lat=${ngo.lat}&lon=${ngo.lon}`);
     const sj = await s.json();
     console.log("SEARCH RESULTS:", sj);
