@@ -1,0 +1,12 @@
+[project]
+name = "ml_service"
+version = "0.1.0"
+description = "ML service package for EarthPulse backend"
+authors = [
+    { name="Your Name" }
+]
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

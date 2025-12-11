@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: ml_service
+Version: 0.1.0
+Summary: ML service package for EarthPulse backend
+Author: Your Name
+Requires-Python: >=3.10
