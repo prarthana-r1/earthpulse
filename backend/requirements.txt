@@ -14,4 +14,3 @@ fpdf2
 matplotlib
 Pillow
 gunicorn
--e ../ml_service
