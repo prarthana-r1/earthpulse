@@ -6,9 +6,6 @@ import os
 from pywebpush import webpush, WebPushException
 
 
-# Add earthpulse_ml folder to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../ml_service/earthpulse_ml")))
-
 from flask import Flask, request, jsonify
 import json
 from flask_cors import CORS
@@ -62,7 +59,7 @@ def ensure_push():
         PUSH_MODULE = None
         PUSH_AVAILABLE = False
         PUSH_IMPORT_ERROR = str(e)
-import tensorflow as tf
+
 import pandas as pd
 import numpy as np
 import os
