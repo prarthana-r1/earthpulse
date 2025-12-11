@@ -105,6 +105,15 @@ def prepare_features_for_model(lat, lon, model_feats):
 app = Flask("earthpulse_api")
 CORS(app)
 
+# ✅ Ensure ALL responses (including errors) get CORS headers
+@app.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "https://earthpulse-ten.vercel.app"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
+    
 # --- Web Push setup ---
 VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY')
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
