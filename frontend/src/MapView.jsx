@@ -304,8 +304,9 @@ console.log("DETAILS R:", r);
     const fetchHotspots = async () => {
       try {
         const resp = await axios.get(
-          `/api/hotspots?lat=${coords[0]}&lon=${coords[1]}&radius_km=200`
-        );
+  `${BACKEND}/api/hotspots?lat=${coords[0]}&lon=${coords[1]}&radius_km=200`
+);
+
 
         const data = resp.data;
 
@@ -374,8 +375,9 @@ console.log("DETAILS R:", r);
     const fetchFlood = async () => {
       try {
         const res = await axios.get(
-          `/api/flood_zones?lat=${coords[0]}&lon=${coords[1]}`
-        );
+  `${BACKEND}/api/flood_zones?lat=${coords[0]}&lon=${coords[1]}`
+);
+
         if (res.data?.type === "FeatureCollection") {
           setFloodZones(res.data);
         } else {
@@ -397,8 +399,9 @@ console.log("DETAILS R:", r);
     const fetchWaterways = async () => {
       try {
         const res = await axios.get(
-          `/api/waterways?lat=${coords[0]}&lon=${coords[1]}`
-        );
+  `${BACKEND}/api/waterways?lat=${coords[0]}&lon=${coords[1]}`
+);
+
 
         const data = res.data;
         if (!data || data.type !== "FeatureCollection") {
