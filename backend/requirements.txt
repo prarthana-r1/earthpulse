@@ -13,3 +13,4 @@ apscheduler==3.10.4
 fpdf2
 matplotlib
 Pillow
+gunicorn
