@@ -44,8 +44,8 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np
 import os
-from openmeteo_client import fetch_realtime
-from feature_engineering import add_lagged_aggregates, select_features
+from earthpulse_ml.openmeteo_client import fetch_realtime
+from earthpulse_ml.feature_engineering import add_lagged_aggregates, select_features
 from datetime import datetime, timezone, timedelta
 
 
