@@ -8,12 +8,12 @@ export default defineConfig({
     tailwindcss(),
   ],
 
+  // Only used during development
   server: {
     proxy: {
       "/api": {
         target: "http://localhost:5000",
         changeOrigin: true,
-        secure: false,
       },
     },
   },

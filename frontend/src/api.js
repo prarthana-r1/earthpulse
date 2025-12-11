@@ -1,7 +1,7 @@
 // src/api.js
 import axios from "axios";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "https://earthpulse-backend.onrender.com";
 
 export async function fetchPrediction(city) {
   const r = await axios.get(`${BACKEND}/predict`, { params: { city } });
