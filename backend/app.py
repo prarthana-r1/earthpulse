@@ -4,6 +4,16 @@ load_dotenv()
 import sys
 import os
 from pywebpush import webpush, WebPushException
+from flask import Flask
+from flask_cors import CORS
+
+app = Flask("earthpulse_api")
+
+CORS(
+    app,
+    resources={r"/*": {"origins": "https://earthpulse-ten.vercel.app"}},
+    supports_credentials=False
+)
 
 
 # Add earthpulse_ml folder to sys.path
@@ -101,17 +111,7 @@ def prepare_features_for_model(lat, lon, model_feats):
     aligned = last.reindex(columns=model_feats, fill_value=0.0)
     return aligned
 
-# --- App ---
-app = Flask("earthpulse_api")
-CORS(app)
 
-# ✅ Ensure ALL responses (including errors) get CORS headers
-@app.after_request
-def apply_cors(response):
-    response.headers["Access-Control-Allow-Origin"] = "https://earthpulse-ten.vercel.app"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return response
 
     
 # --- Web Push setup ---
