@@ -1,18 +1,18 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
   ],
 
-  // Only used during development
+  build: {
+    outDir: "dist",
+    copyPublicDir: true,   // ⬅ copies public/sw.js → dist/sw.js
+  },
+
   server: {
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: "https://earthpulse-backend-48598371636.asia-south1.run.app",
         changeOrigin: true,
       },
     },
