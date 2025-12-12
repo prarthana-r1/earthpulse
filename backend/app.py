@@ -1429,16 +1429,17 @@ def download_report():
     )
 
 
+@app.get("/run_scheduler")
+def run_scheduler():
+    periodic_risk_check()
+    return {"status": "job executed"}
+
 
 
 if __name__ == "__main__":
-    start_alert_scheduler()
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
-    # optional: delayed test run (5 seconds after server start)
-    import threading
-    threading.Timer(5, periodic_risk_check).start()
-
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
 
 
 

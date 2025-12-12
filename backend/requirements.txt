@@ -1,16 +1,33 @@
 Flask==2.2.5
 flask-cors==3.0.10
 requests==2.31.0
-tensorflow-cpu==2.20.0   
-pandas
+
+# TensorFlow CPU (2.20.0 specific dependencies)
+tensorflow-cpu==2.20.0
+
+# Data processing
+pandas==2.2.2
+numpy==1.26.4
+
+# Weather API helpers
 openmeteo-requests
 requests-cache
 retry-requests
+
+# Push notifications
 pywebpush==2.1.1
-cryptography>=3.4.7
+cryptography==42.0.5
+
+# Environment
 python-dotenv==1.0.0
+
+# Scheduling (Cloud Run uses Cloud Scheduler instead, but keep for local)
 apscheduler==3.10.4
-fpdf2
-matplotlib
-Pillow
-gunicorn
+
+# PDF + Images
+fpdf2==2.7.8
+matplotlib==3.8.4
+Pillow==10.3.0
+
+# Web server
+gunicorn==21.2.0
