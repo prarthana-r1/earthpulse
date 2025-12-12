@@ -1,3 +1,7 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -6,7 +10,7 @@ export default defineConfig({
 
   build: {
     outDir: "dist",
-    copyPublicDir: true,   // ⬅ copies public/sw.js → dist/sw.js
+    copyPublicDir: true,   // IMPORTANT for sw.js
   },
 
   server: {
