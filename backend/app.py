@@ -1,4 +1,4 @@
-# server/app.py
+#app.py
 from dotenv import load_dotenv
 load_dotenv()
 import sys
@@ -6,6 +6,19 @@ import os
 from pywebpush import webpush, WebPushException
 from flask import Flask
 from flask_cors import CORS
+from flask import Flask, request, jsonify
+import json
+import requests
+import importlib
+
+import tensorflow as tf
+import pandas as pd
+import numpy as np
+import os
+from earthpulse_ml.openmeteo_client import fetch_realtime
+from earthpulse_ml.feature_engineering import add_lagged_aggregates, select_features
+from datetime import datetime, timezone, timedelta
+
 
 app = Flask("earthpulse_api")
 
@@ -16,24 +29,44 @@ CORS(
 )
 
 
-# Add earthpulse_ml folder to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "earthpulse_ml")))
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-from flask import Flask, request, jsonify
-import json
-from flask_cors import CORS
-import requests
-import importlib
+FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY")
+ALERT_PHONE = os.getenv("ALERT_PHONE")
+
+
+
+# --- Config ---
+OPENWEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
+OPENWEATHER_ONECALL = "https://api.openweathermap.org/data/2.5/onecall"
+OPENWEATHER_GEOCODE = "https://api.openweathermap.org/geo/1.0/direct"
+
+GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+DEFAULT_FLOOD_MODEL = os.path.join(os.path.dirname(__file__), "models/flood_model.keras")
+DEFAULT_WILDFIRE_MODEL = os.path.join(os.path.dirname(__file__), "models/wildfire_model.keras")
+
+FLOOD_MODEL = None
+FLOOD_FEATS = None
+WILDFIRE_MODEL = None
+WILDFIRE_FEATS = None
+
+def get_models():
+    global FLOOD_MODEL, FLOOD_FEATS, WILDFIRE_MODEL, WILDFIRE_FEATS
+
+    if FLOOD_MODEL is None:
+        FLOOD_MODEL, FLOOD_FEATS = load_model_and_features(DEFAULT_FLOOD_MODEL)
+
+    if WILDFIRE_MODEL is None:
+        WILDFIRE_MODEL, WILDFIRE_FEATS = load_model_and_features(DEFAULT_WILDFIRE_MODEL)
+
+    return FLOOD_MODEL, FLOOD_FEATS, WILDFIRE_MODEL, WILDFIRE_FEATS
+
+
 
 # Lazy import helper for pywebpush (avoids static import errors in editors)
 PUSH_MODULE = None
 PUSH_IMPORT_ERROR = None
 PUSH_AVAILABLE = False
-
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY")
-ALERT_PHONE = os.getenv("ALERT_PHONE")
 
 
 def ensure_push():
@@ -51,24 +84,6 @@ def ensure_push():
         PUSH_AVAILABLE = False
         PUSH_IMPORT_ERROR = str(e)
 
-
-import tensorflow as tf
-import pandas as pd
-import numpy as np
-import os
-from earthpulse_ml.openmeteo_client import fetch_realtime
-from earthpulse_ml.feature_engineering import add_lagged_aggregates, select_features
-from datetime import datetime, timezone, timedelta
-
-
-# --- Config ---
-OPENWEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
-OPENWEATHER_ONECALL = "https://api.openweathermap.org/data/2.5/onecall"
-OPENWEATHER_GEOCODE = "https://api.openweathermap.org/geo/1.0/direct"
-
-GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-DEFAULT_FLOOD_MODEL = os.path.join(os.path.dirname(__file__), "models/flood_model.keras")
-DEFAULT_WILDFIRE_MODEL = os.path.join(os.path.dirname(__file__), "models/wildfire_model.keras")
 
 
 # --- Helpers ---
@@ -204,6 +219,8 @@ def health():
 
 @app.get("/predict")
 def predict():
+    FLOOD_MODEL, FLOOD_FEATS, WILDFIRE_MODEL, WILDFIRE_FEATS = get_models()
+
     """
     Query parameters:
       - city=Name  OR lat=..&lon=..
