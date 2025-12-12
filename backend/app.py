@@ -17,7 +17,7 @@ CORS(
 
 
 # Add earthpulse_ml folder to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "ml_service")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "earthpulse_ml")))
 
 from flask import Flask, request, jsonify
 import json
@@ -50,13 +50,14 @@ def ensure_push():
         PUSH_MODULE = None
         PUSH_AVAILABLE = False
         PUSH_IMPORT_ERROR = str(e)
+
+
 import tensorflow as tf
 import pandas as pd
 import numpy as np
 import os
-from ml_service.earthpulse_ml.openmeteo_client import fetch_realtime
-from ml_service.earthpulse_ml.feature_engineering import add_lagged_aggregates, select_features
-
+from earthpulse_ml.openmeteo_client import fetch_realtime
+from earthpulse_ml.feature_engineering import add_lagged_aggregates, select_features
 from datetime import datetime, timezone, timedelta
 
 
@@ -66,8 +67,8 @@ OPENWEATHER_ONECALL = "https://api.openweathermap.org/data/2.5/onecall"
 OPENWEATHER_GEOCODE = "https://api.openweathermap.org/geo/1.0/direct"
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-DEFAULT_FLOOD_MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "ml_service/models/flood_model.keras"))
-DEFAULT_WILDFIRE_MODEL = os.path.abspath(os.path.join(os.path.dirname(__file__), "ml_service/models/wildfire_model.keras"))
+DEFAULT_FLOOD_MODEL = os.path.join(os.path.dirname(__file__), "models/flood_model.keras")
+DEFAULT_WILDFIRE_MODEL = os.path.join(os.path.dirname(__file__), "models/wildfire_model.keras")
 
 
 # --- Helpers ---
