@@ -1,7 +1,7 @@
 // src/api.js
 import axios from "axios";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "https://earthpulse-backend.onrender.com";
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "https://earthpulse-backend-48598371636.asia-south1.run.app";
 
 // ---------------------------
 // PREDICTION

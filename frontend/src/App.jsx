@@ -40,7 +40,7 @@ function App() {
   const [historyData, setHistoryData] = useState(null);
 
   const apiKey = import.meta.env.VITE_WEATHERAPI_CURLOC;
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://earthpulse-backend.onrender.com';
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://earthpulse-backend-48598371636.asia-south1.run.app';
   const searchRef = useRef(null);
   const suggestionsRef = useRef(null);
   const autoSelectedRef = useRef(false);

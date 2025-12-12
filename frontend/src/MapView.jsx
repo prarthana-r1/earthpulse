@@ -16,7 +16,7 @@ import axios from "axios";
 import "leaflet.heat";
 
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "https://earthpulse-backend.onrender.com";
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "https://earthpulse-backend-48598371636.asia-south1.run.app";
 
 // Fix default marker icons
 delete L.Icon.Default.prototype._getIconUrl;
