@@ -221,48 +221,49 @@ def health():
 def predict():
     FLOOD_MODEL, FLOOD_FEATS, WILDFIRE_MODEL, WILDFIRE_FEATS = get_models()
 
-    """
-    Query parameters:
-      - city=Name  OR lat=..&lon=..
-      - optional: flood_model, wildfire_model (paths)
-    """
+    # --- Parse location ---
     city = request.args.get("city")
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
 
-    # resolve coords
+    # Geocode city
     if city:
-        # Special test city: Floodville -> return canned high-flood coordinates/result
-        if city.strip().lower() == 'floodville':
+        if city.strip().lower() == "floodville":
             lat, lon = 12.9716, 77.5946
-            # return a quick canned response (we still construct full output below after model/pred)
         else:
             try:
                 lat, lon = geocode_city(city)
             except Exception as e:
                 return jsonify({"error": str(e)}), 400
-    else:
-        if lat is None or lon is None:
-            return jsonify({"error": "Provide --city or (lat & lon)"}), 400
 
-    # prepare features and predict
-    # If Floodville, bypass model and return a high flood probability for testing
-    if city and city.strip().lower() == 'floodville':
+    # Validate coordinates
+    if lat is None or lon is None:
+        return jsonify({"error": "Provide a valid city or coordinates"}), 400
+
+    # --- Predictions ---
+    if city and city.strip().lower() == "floodville":
         flood_prob = 0.95
         fire_prob = 0.05
     else:
-        X_flood = prepare_features_for_model(lat, lon, FLOOD_FEATS).values.astype("float32")
-        X_fire = prepare_features_for_model(lat, lon, WILDFIRE_FEATS).values.astype("float32")
+        try:
+            X_flood = prepare_features_for_model(lat, lon, FLOOD_FEATS).values.astype("float32")
+            flood_prob = float(FLOOD_MODEL.predict(X_flood, verbose=0)[0][0])
+        except Exception as e:
+            print("❌ Flood model failure:", e)
+            return jsonify({"error": "flood_model_failure"}), 500
 
-        flood_prob = float(FLOOD_MODEL.predict(X_flood, verbose=0)[0][0]) if FLOOD_FEATS else None
-        fire_prob = float(WILDFIRE_MODEL.predict(X_fire, verbose=0)[0][0]) if WILDFIRE_FEATS else None
+        try:
+            X_fire = prepare_features_for_model(lat, lon, WILDFIRE_FEATS).values.astype("float32")
+            fire_prob = float(WILDFIRE_MODEL.predict(X_fire, verbose=0)[0][0])
+        except Exception as e:
+            print("❌ Fire model failure:", e)
+            return jsonify({"error": "wildfire_model_failure"}), 500
 
-    flood_label = "High" if (flood_prob is not None and flood_prob >= 0.5) else "Low"
-    fire_label = "High" if (fire_prob is not None and fire_prob >= 0.5) else "Low"
+    flood_label = "High" if flood_prob >= 0.5 else "Low"
+    fire_label = "High" if fire_prob >= 0.5 else "Low"
 
-    # Also return latest raw weather snapshot for convenience
-    if city and city.strip().lower() == 'floodville':
-        # Create a simple synthetic weather dataframe-like dict for latest snapshot
+    # --- Weather snapshot ---
+    if city and city.strip().lower() == "floodville":
         latest_weather = {
             "time": datetime.now(timezone.utc).isoformat(),
             "temp_c": 25.0,
@@ -271,17 +272,21 @@ def predict():
             "wind_kph": 10.0
         }
     else:
-        wx = fetch_realtime(lat, lon, timezone_name="auto")
-        latest_weather = wx.iloc[-1].to_dict() if wx.shape[0] else {}
+        try:
+            wx = fetch_realtime(lat, lon, timezone_name="UTC")
+            latest_weather = wx.iloc[-1].to_dict() if wx.shape[0] else {}
+        except Exception as e:
+            print("⚠ Weather fetch failed:", e)
+            latest_weather = {"error": "weather_unavailable"}
 
-    out = {
-        "city": city if city else f"{lat},{lon}",
+    # --- Response ---
+    return jsonify({
+        "city": city or f"{lat},{lon}",
         "coordinates": {"latitude": lat, "longitude": lon},
         "weather": latest_weather,
         "wildfire": {"probability": fire_prob, "label": fire_label},
         "flood": {"probability": flood_prob, "label": flood_label}
-    }
-    return jsonify(out)
+    })
 
 
 def fetch_openweather(city: str):

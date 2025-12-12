@@ -64,13 +64,13 @@ def fetch_archive_timeseries(lat: float, lon: float, start: datetime, end: datet
     df["time"] = pd.to_datetime(df["time"])
     return df.set_index("time")
 
-def fetch_realtime(lat: float, lon: float, hourly: Optional[List[str]] = None, timezone_name: str = "UTC") -> pd.DataFrame:
-    """
-    Fetch real-time weather from Open-Meteo.
-    Uses strict timeout to avoid Render timeouts.
-    NEVER returns fake data.
-    """
+def fetch_realtime(lat: float, lon: float, hourly=None, timezone_name="UTC") -> pd.DataFrame:
     hourly = hourly or DEFAULT_HOURLY
+
+    # ensure timezone compatibility
+    if timezone_name == "auto":
+        timezone_name = "UTC"
+
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -81,13 +81,12 @@ def fetch_realtime(lat: float, lon: float, hourly: Optional[List[str]] = None, t
     }
 
     try:
-        # ⬅ STRICT timeout to prevent Render 502
-        r = requests.get(OPEN_METEO_BASE, params=params, timeout=6)
+        # safe for Render/Vercel
+        r = requests.get(OPEN_METEO_BASE, params=params, timeout=7)
         r.raise_for_status()
         data = r.json()
     except Exception as e:
         print("⚠ Real-time weather fetch failed:", e)
-        # propagate EXACT failure to caller (predict())
         raise RuntimeError("weather_service_unavailable")
 
     if "hourly" not in data:
@@ -96,6 +95,7 @@ def fetch_realtime(lat: float, lon: float, hourly: Optional[List[str]] = None, t
     df = pd.DataFrame(data["hourly"])
     df["time"] = pd.to_datetime(df["time"])
     return df.set_index("time")
+
 
 
 def fetch_fwi(lat: float, lon: float, start: datetime, end: datetime, timezone_name: str = "UTC") -> pd.DataFrame:
