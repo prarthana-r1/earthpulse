@@ -629,7 +629,7 @@ ALERT_INTERVAL_MINUTES = float(os.environ.get("ALERT_INTERVAL_MINUTES", "1"))
 COOLDOWN_MINUTES = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "1"))
 ALERT_FLOOD_THRESHOLD = float(os.environ.get("ALERT_FLOOD_THRESHOLD", "0.7"))
 ALERT_FIRE_THRESHOLD = float(os.environ.get("ALERT_FIRE_THRESHOLD", "0.7"))
-INTERNAL_BASE_URL = os.environ.get("INTERNAL_BASE_URL", "http://localhost:5000").rstrip("/")
+INTERNAL_BASE_URL = os.environ.get("INTERNAL_BASE_URL", "https://earthpulse-backend-48598371636.asia-south1.run.app").rstrip("/")
 
 _last_alert_sent = {}
 
@@ -652,7 +652,7 @@ def send_alert_sms(alert_msg: str):
     payload = {
         "message": alert_msg,
         "language": "english",
-        "route": "q",
+        "route": "v3",        # ✅ UPDATED
         "numbers": ALERT_PHONE
     }
 
@@ -661,8 +661,15 @@ def send_alert_sms(alert_msg: str):
         "Content-Type": "application/x-www-form-urlencoded"
     }
 
-    response = requests.post(url, data=payload, headers=headers)
-    print("SMS Response:", response.json())
+    try:
+        response = requests.post(url, data=payload, headers=headers)
+        print("FAST2SMS STATUS:", response.status_code)
+        print("FAST2SMS RAW:", response.text)   # 👈 ALWAYS LOG RAW RESPONSE
+        return response.json()
+    except Exception as e:
+        print("FAST2SMS ERROR:", str(e))
+        return {"error": str(e)}
+
 
 
 
