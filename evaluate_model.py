@@ -10,9 +10,9 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
-MODEL_PATH = r"D:\projects\sem7\earthpulse\backend\models\wildfire_model.keras"
-DATA_PATH  = r"D:\projects\sem7\earthpulse\backend\processed\wildfire.parquet"
-FEATURES_PATH = r"D:\projects\sem7\earthpulse\backend\models\wildfire_model.keras.features.txt"
+MODEL_PATH = r"D:\projects\sem7\earthpulse\backend\models\flood_model.keras"
+DATA_PATH  = r"D:\projects\sem7\earthpulse\backend\processed\flood.parquet"
+FEATURES_PATH = r"D:\projects\sem7\earthpulse\backend\models\flood_model.keras.features.txt"
 TARGET_COL = "label"
 
 # Load dataset
