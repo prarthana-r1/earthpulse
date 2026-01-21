@@ -39,7 +39,13 @@ def _prepare_features(lat: float, lon: float) -> tuple[pd.DataFrame, dict]:
     wx_eng = add_lagged_aggregates(wx)
     feats = select_features(wx_eng).fillna(0.0)
     # Latest weather snapshot for output
-    latest_weather = wx.iloc[-1].to_dict()
+    row = wx.iloc[-1].to_dict()
+    latest_weather = {
+        **row,
+        "precip_mm": row.get("precipitation", 0.0),
+        "rain_mm": row.get("rain", 0.0)
+    }
+
     return feats.iloc[[-1]], latest_weather
 
 def predict_risks(city: str | None, lat: float | None, lon: float | None,

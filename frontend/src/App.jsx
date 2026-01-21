@@ -676,7 +676,7 @@ useEffect(() => {
       temperature: hour.temp_c,
       humidity: hour.humidity,
       windSpeed: hour.wind_kph,
-      precipitation: hour.precip_mm,
+      precipitation: hour.precip_mm ?? hour.precipitation ?? hour.rain ?? 0,
       pressure: hour.pressure_mb
     }));
   };
@@ -690,7 +690,7 @@ useEffect(() => {
       minTemp: day.day.mintemp_c,
       humidity: day.day.avghumidity,
       windSpeed: day.day.maxwind_kph,
-      precipitation: day.day.totalprecip_mm,
+      precipitation: day.day.totalprecip_mm ?? day.day.precipitation ?? 0,
       rainChance: day.day.daily_chance_of_rain
     }));
   };
