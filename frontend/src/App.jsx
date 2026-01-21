@@ -33,7 +33,7 @@ const SUGGESTED_CITIES = [
   "Nashik","Aurangabad","Solapur","Lonavala","Mahabaleshwar",
 
   // Kerala
-  "Kochi","Thiruvananthapuram","Kozhikode","Thrissur","Alappuzha","Kottayam",
+  "Ernakulam","Thiruvananthapuram","Kozhikode","Thrissur","Alappuzha","Kottayam",
   "Munnar","Wayanad","Idukki","Varkala",
 
   // Tamil Nadu
