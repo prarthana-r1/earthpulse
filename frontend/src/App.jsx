@@ -1278,6 +1278,14 @@ return (
                     <span className="text-xl">🌧️</span>
                     Precipitation
                   </h3>
+
+                   {/* 🌤️ No precipitation message */}
+  {(viewMode === "hourly" ? hourlyData : dailyData)
+    .every(d => d.precipitation === 0) && (
+    <div className="text-center text-slate-400 text-sm mb-2">
+      ☀️ No precipitation expected during this period
+    </div>
+  )}
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={
