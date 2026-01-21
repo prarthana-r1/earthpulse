@@ -5,40 +5,40 @@ import os
 
 def create_flood_label(df):
     """
-    Flood label based on extreme precipitation
-    using dataset-calibrated threshold.
+    Flood label based on rolling rainfall accumulation,
+    aligned with hydrological reality.
     """
-    # Flood if precipitation is in top ~5% of observed values
-    threshold = df["precipitation"].quantile(0.95)
-    return (df["precipitation"] >= threshold).astype(int)
+    # 24-hour accumulated rainfall
+    rain_24h = df["precipitation"].rolling(24, min_periods=6).sum()
+
+    # Thresholds based on IMD / hydrology practice
+    return (
+        (rain_24h >= 50) |        # severe rainfall
+        (rain_24h >= 30) & (df["precipitation"] > 5)  # sustained rain
+    ).astype(int)
+
 
 
 def create_wildfire_label(df):
     """
-    Wildfire label based on extreme hot, dry, and windy conditions
-    using dataset-calibrated quantile thresholds.
+    Wildfire label based on sustained dry-hot-windy conditions.
     """
 
-    # High temperature (top 10%)
-    t_thresh = df["temperature_2m"].quantile(0.90)
-
-    # Low humidity (bottom 10%)
-    h_thresh = df["relative_humidity_2m"].quantile(0.10)
-
-    # High wind (top 10%)
-    w_thresh = df["wind_speed_10m"].quantile(0.90)
-
-    # Optional dryness indicator (top 10%)
-    e_thresh = df["et0_fao_evapotranspiration"].quantile(0.90)
+    # Rolling dryness indicators
+    temp_3d = df["temperature_2m"].rolling(72, min_periods=24).mean()
+    humidity_3d = df["relative_humidity_2m"].rolling(72, min_periods=24).mean()
+    wind_3d = df["wind_speed_10m"].rolling(72, min_periods=24).max()
+    et0_3d = df["et0_fao_evapotranspiration"].rolling(72, min_periods=24).mean()
 
     return (
-        (df["temperature_2m"] >= t_thresh) &
-        (df["relative_humidity_2m"] <= h_thresh) &
+        (temp_3d >= 32) &
+        (humidity_3d <= 35) &
         (
-            (df["wind_speed_10m"] >= w_thresh) |
-            (df["et0_fao_evapotranspiration"] >= e_thresh)
+            (wind_3d >= 18) |
+            (et0_3d >= 4.5)
         )
     ).astype(int)
+
 
 
 def build_wildfire_dataset(df: pd.DataFrame, out_name: str) -> pd.DataFrame:
