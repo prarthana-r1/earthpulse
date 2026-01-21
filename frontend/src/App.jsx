@@ -676,7 +676,10 @@ useEffect(() => {
       temperature: hour.temp_c,
       humidity: hour.humidity,
       windSpeed: hour.wind_kph,
-      precipitation: hour.precip_mm ?? hour.precipitation ?? hour.rain ?? 0,
+precipitation:
+  (hour.precip_mm ?? hour.precipitation ?? hour.rain ?? 0) > 0
+    ? Math.max(hour.precip_mm ?? hour.precipitation ?? hour.rain, 0.2)
+    : 0,
       pressure: hour.pressure_mb
     }));
   };
@@ -1166,7 +1169,13 @@ return (
                         stroke="#94a3b8"
                         fontSize={12}
                       />
-                      <YAxis stroke="#94a3b8" fontSize={12} />
+                      <YAxis
+  stroke="#94a3b8"
+  fontSize={12}
+  domain={[0, 'dataMax + 1']}
+  allowDecimals={false}
+/>
+
                       <Tooltip 
                         contentStyle={{ 
                           backgroundColor: 'rgba(15, 23, 42, 0.95)', 
