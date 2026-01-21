@@ -2,20 +2,66 @@ from __future__ import annotations
 import pandas as pd
 import os
 
+
+def create_flood_label(df):
+    """
+    Flood label based on extreme precipitation
+    using dataset-calibrated threshold.
+    """
+    # Flood if precipitation is in top ~5% of observed values
+    threshold = df["precipitation"].quantile(0.95)
+    return (df["precipitation"] >= threshold).astype(int)
+
+
+def create_wildfire_label(df):
+    """
+    Wildfire label based on extreme hot, dry, and windy conditions
+    using dataset-calibrated quantile thresholds.
+    """
+
+    # High temperature (top 10%)
+    t_thresh = df["temperature_2m"].quantile(0.90)
+
+    # Low humidity (bottom 10%)
+    h_thresh = df["relative_humidity_2m"].quantile(0.10)
+
+    # High wind (top 10%)
+    w_thresh = df["wind_speed_10m"].quantile(0.90)
+
+    # Optional dryness indicator (top 10%)
+    e_thresh = df["et0_fao_evapotranspiration"].quantile(0.90)
+
+    return (
+        (df["temperature_2m"] >= t_thresh) &
+        (df["relative_humidity_2m"] <= h_thresh) &
+        (
+            (df["wind_speed_10m"] >= w_thresh) |
+            (df["et0_fao_evapotranspiration"] >= e_thresh)
+        )
+    ).astype(int)
+
+
 def build_wildfire_dataset(df: pd.DataFrame, out_name: str) -> pd.DataFrame:
-    if "wildfire_label" not in df.columns:
-        raise ValueError("Missing 'wildfire_label' column for wildfire mode.")
+    # Create wildfire_label using climate extremes
+    df["wildfire_label"] = create_wildfire_label(df)
+
+    # Map wildfire_label → label
     df = df.rename(columns={"wildfire_label": "label"})
+
     os.makedirs("data/processed", exist_ok=True)
     out_parquet = os.path.join("data/processed", os.path.basename(out_name))
     df.to_parquet(out_parquet, index=False)
     print(f"🔥 Wildfire dataset saved → {out_parquet}")
     return df
 
+
 def build_flood_dataset(df: pd.DataFrame, out_name: str) -> pd.DataFrame:
-    if "flood_label" not in df.columns:
-        raise ValueError("Missing 'flood_label' column for flood mode.")
+    # Create flood_label if it does not exist or is empty
+    df["flood_label"] = create_flood_label(df)
+
+# Map flood_label → label (expected by training)
     df = df.rename(columns={"flood_label": "label"})
+
     os.makedirs("data/processed", exist_ok=True)
     out_parquet = os.path.join("data/processed", os.path.basename(out_name))
     df.to_parquet(out_parquet, index=False)

@@ -7,17 +7,93 @@ import "./index.css";
 
 // Popular Indian cities for initial suggestions
 const SUGGESTED_CITIES = [
-  "Delhi", "Mumbai", "Bengaluru", "Chennai", "Kolkata", "Hyderabad",
-  "Pune", "Ahmedabad", "Jaipur", "Surat", "Lucknow", "Kanpur",
-  "Nagpur", "Indore", "Thane", "Bhopal", "Visakhapatnam", "Pimpri-Chinchwad",
-  "Floodville",
-  "Patna", "Vadodara", "Ghaziabad", "Ludhiana", "Agra", "Nashik",
-  "Faridabad", "Meerut", "Rajkot", "Kalyan-Dombivali", "Vasai-Virar",
-  "Varanasi", "Srinagar", "Aurangabad", "Dhanbad", "Amritsar",
-  "Navi Mumbai", "Allahabad", "Ranchi", "Howrah", "Coimbatore",
-  "Jabalpur", "Gwalior", "Vijayawada", "Jodhpur", "Madurai",
-  "Raipur", "Kota", "Guwahati", "Chandigarh", "Solapur","Thiruvananthapuram",
+  // Assam
+  "Guwahati","Dibrugarh","Silchar","Jorhat","Tezpur","Nagaon","Lakhimpur",
+  "Kaziranga","Majuli","Sivasagar",
+
+  // Bihar
+  "Patna","Bhagalpur","Muzaffarpur","Darbhanga","Purnia","Katihar","Gaya",
+  "Nalanda","Rajgir","Bodh Gaya",
+
+  // Uttar Pradesh
+  "Varanasi","Allahabad","Gorakhpur","Lucknow","Kanpur","Agra","Meerut","Ballia",
+  "Ayodhya","Mathura","Vrindavan","Noida","Ghaziabad",
+
+  // West Bengal
+  "Kolkata","Howrah","Hooghly","Malda","Asansol","Siliguri","Cooch Behar",
+  "Darjeeling","Kalimpong","Durgapur","Haldia",
+
+  // Odisha
+  "Bhubaneswar","Cuttack","Puri","Balasore","Bhadrak","Jagatsinghpur",
+  "Konark","Rourkela","Sambalpur",
+
+  // Maharashtra
+  "Mumbai","Thane","Navi Mumbai","Pune","Kolhapur","Sangli","Nagpur",
+  "Chandrapur","Gadchiroli",
+  "Nashik","Aurangabad","Solapur","Lonavala","Mahabaleshwar",
+
+  // Kerala
+  "Kochi","Thiruvananthapuram","Kozhikode","Thrissur","Alappuzha","Kottayam",
+  "Munnar","Wayanad","Idukki","Varkala",
+
+  // Tamil Nadu
+  "Chennai","Cuddalore","Nagapattinam","Coimbatore","Salem","Madurai",
+  "Rameswaram","Kanyakumari","Tiruchirappalli","Thanjavur","Ooty",
+
+  // Andhra Pradesh
+  "Vijayawada","Rajahmundry","Kakinada","Visakhapatnam","Tirupati",
+  "Nellore","Kurnool","Srikakulam","Araku",
+
+  // Telangana
+  "Hyderabad","Khammam","Adilabad","Mancherial","Warangal","Karimnagar",
+  "Nizamabad","Mahbubnagar","Bhadrachalam",
+
+  // Uttarakhand
+  "Dehradun","Haridwar","Rishikesh","Nainital","Almora",
+  "Mussoorie","Haldwani","Kedarnath","Badrinath",
+
+  // Karnataka
+  "Bengaluru","Mangaluru","Udupi","Hubballi","Belagavi",
+  "Chikkamagaluru","Madikeri","Shivamogga","Hassan","Mysuru","Tumakuru",
+  "Hampi","Gokarna","Coorg","Ballari","Davangere",
+
+  // Madhya Pradesh
+  "Bhopal","Indore","Jabalpur","Satna","Rewa","Ujjain",
+  "Sanchi","Khajuraho","Gwalior","Pachmarhi",
+
+  // Chhattisgarh
+  "Raipur","Bilaspur","Durg","Jagdalpur","Bastar",
+  "Korba","Ambikapur",
+
+  // Rajasthan
+  "Jaipur","Udaipur","Mount Abu","Kota","Ajmer","Bikaner",
+  "Jodhpur","Jaisalmer","Pushkar","Chittorgarh",
+
+  // Gujarat
+  "Ahmedabad","Surat","Vadodara","Rajkot","Jamnagar","Gandhinagar",
+  "Dwarka","Somnath","Bhuj","Porbandar","Statue of Unity",
+
+  // Punjab
+  "Chandigarh","Ludhiana","Jalandhar","Amritsar","Patiala",
+  "Bathinda","Hoshiarpur",
+
+  // Haryana
+  "Gurgaon","Faridabad","Panipat","Sonipat","Rohtak",
+  "Kurukshetra","Hisar","Karnal",
+
+  // Himachal Pradesh
+  "Shimla","Kullu","Mandi","Solan",
+  "Manali","Dharamshala","Dalhousie","Una",
+
+  // Jammu & Kashmir
+  "Srinagar","Jammu","Anantnag","Baramulla",
+  "Gulmarg","Pahalgam","Leh",
+
+  // Delhi
+  "Delhi","New Delhi"
 ];
+
+
 
 // Replaced with real API imports
 function App() {
